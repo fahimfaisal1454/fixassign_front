@@ -16,6 +16,9 @@ export default function GradeScaleManager() {
   const [editBands, setEditBands] = useState([]);
   const [savingEdit, setSavingEdit] = useState(false);
 
+  // ───────────────────────────────────────────────────────────────────────────
+  // Data loading
+  // ───────────────────────────────────────────────────────────────────────────
   const load = async () => {
     try {
       const { data } = await AxiosInstance.get("grade-scales/");
@@ -26,7 +29,9 @@ export default function GradeScaleManager() {
   };
   useEffect(() => { load(); }, []);
 
-  // -------------------- CREATE --------------------
+  // ───────────────────────────────────────────────────────────────────────────
+  // CREATE (new scale)
+  // ───────────────────────────────────────────────────────────────────────────
   const addBand = () => setBands((b) => [...b, { ...EMPTY_ROW }]);
   const rmBand  = (i) => setBands((b) => b.filter((_, idx) => idx !== i));
   const setBand = (i, k, v) => setBands((b) => b.map((row, idx) => idx === i ? { ...row, [k]: v } : row));
@@ -50,6 +55,7 @@ export default function GradeScaleManager() {
     const isNum = (x) => typeof x === "number" && !Number.isNaN(x);
     const rows = normalized;
 
+    // base per-row validation
     rows.forEach((r, i) => {
       const e = {};
       if (!isNum(r.min_score) || r.min_score < 0 || r.min_score > 100) e.min = 1;
@@ -59,24 +65,96 @@ export default function GradeScaleManager() {
       if (!(typeof r.gpa === "number" && !Number.isNaN(r.gpa))) e.gpa = 1;
       errs[i] = e;
     });
-    // overlap
-    const sorted = rows.map((r,i)=>({...r,__i:i})).sort((a,b)=>a.min_score-b.min_score);
-    for (let k=1;k<sorted.length;k++){
-      const a=sorted[k-1], b=sorted[k];
+
+    // duplicates: letter + exact range
+    const byLetter = new Map();
+    const byRange = new Map();
+    rows.forEach((r, i) => {
+      if (r.letter) {
+        const list = byLetter.get(r.letter) || [];
+        byLetter.set(r.letter, [...list, i]);
+      }
+      if (Number.isFinite(r.min_score) && Number.isFinite(r.max_score)) {
+        const key = `${r.min_score}-${r.max_score}`;
+        const list = byRange.get(key) || [];
+        byRange.set(key, [...list, i]);
+      }
+    });
+    for (const [, idxs] of byLetter) {
+      if (idxs.length > 1) idxs.forEach(i => (errs[i].dupLetter = 1));
+    }
+    for (const [, idxs] of byRange) {
+      if (idxs.length > 1) idxs.forEach(i => (errs[i].dupRange = 1));
+    }
+
+    // overlap (same mark covered by different bands) → warning, not crash
+    const sorted = rows
+      .map((r, i) => ({ ...r, __i: i }))
+      .filter(r => Number.isFinite(r.min_score) && Number.isFinite(r.max_score))
+      .sort((a,b)=>a.min_score-b.min_score);
+
+    for (let k=1; k<sorted.length; k++){
+      const a = sorted[k-1], b = sorted[k];
       if (a.max_score >= b.min_score) {
         errs[a.__i].overlap = 1; errs[b.__i].overlap = 1;
       }
     }
+
     return errs;
   }, [normalized]);
 
+  const hasCreateWarnings = useMemo(
+    () => createErrors.some(e => e.overlap || e.dupLetter || e.dupRange),
+    [createErrors]
+  );
+
   const canCreate = useMemo(
-    () => !!name.trim() && normalized.length>0 && createErrors.every(e=>Object.keys(e).length===0),
+    () =>
+      !!name.trim() &&
+      normalized.length > 0 &&
+      createErrors.every(e => {
+        const { min, max, range, letter, gpa } = e;
+        // warnings (overlap/dups) don't block saving; hard errors do
+        return !(min || max || range || letter || gpa);
+      }),
     [name, normalized, createErrors]
   );
 
   const save = async () => {
-    if (!canCreate) { toast.error("Fix errors first"); return; }
+    if (!canCreate) {
+      toast.error("Fix the red errors first.");
+      return;
+    }
+    if (hasCreateWarnings) {
+      toast((t) => (
+        <div>
+          <div className="font-semibold mb-1">Warning</div>
+          <div className="text-sm">Some bands overlap or duplicate. Continue?</div>
+          <div className="mt-2 flex gap-2">
+            <button
+              className="px-2 py-1 rounded bg-rose-600 text-white"
+              onClick={() => toast.dismiss(t.id)}
+            >
+              Review
+            </button>
+            <button
+              className="px-2 py-1 rounded bg-emerald-600 text-white"
+              onClick={async () => {
+                toast.dismiss(t.id);
+                await doSaveCreate();
+              }}
+            >
+              Save anyway
+            </button>
+          </div>
+        </div>
+      ), { duration: 6000 });
+      return;
+    }
+    await doSaveCreate();
+  };
+
+  const doSaveCreate = async () => {
     setBusy(true);
     try {
       const { data: scale } = await AxiosInstance.post("grade-scales/", {
@@ -95,7 +173,10 @@ export default function GradeScaleManager() {
       setName(""); setBands([{ ...EMPTY_ROW }]);
       await load();
     } catch (e) {
-      const msg = e?.response?.data?.detail || e?.response?.data?.name || "Save failed";
+      const msg =
+        e?.response?.data?.detail ||
+        e?.response?.data?.name ||
+        (typeof e?.response?.data === "string" ? e.response.data : "Save failed");
       toast.error(String(msg));
     } finally { setBusy(false); }
   };
@@ -120,7 +201,9 @@ export default function GradeScaleManager() {
     }
   };
 
-  // -------------------- EDIT --------------------
+  // ───────────────────────────────────────────────────────────────────────────
+  // EDIT (existing scale)
+  // ───────────────────────────────────────────────────────────────────────────
   const beginEdit = (scale) => {
     setEditingId(scale.id);
     setEditName(scale.name || "");
@@ -147,85 +230,154 @@ export default function GradeScaleManager() {
   const setEditRow = (idx, k, v) =>
     setEditBands(b => b.map((r,i)=> i===idx ? { ...r, [k]: v } : r));
 
-  const editNormalized = useMemo(() => {
-    return editBands
-      .map(r => ({
-        id: r.id,
+  // ⚠️ safe, index-stable error calc (no indexOf on copies)
+  const editErrors = useMemo(() => {
+    const errs = editBands.map(() => ({}));
+    const isNum = (x) => typeof x === "number" && !Number.isNaN(x);
+
+    // Active (non-deleted) with original index i
+    const active = editBands
+      .map((r, i) => ({
+        i,
         _deleted: !!r._deleted,
         min_score: r.min_score === "" ? "" : Number(r.min_score),
         max_score: r.max_score === "" ? "" : Number(r.max_score),
         letter: (r.letter || "").toUpperCase().trim(),
         gpa: r.gpa === "" ? "" : Number(r.gpa),
       }))
-      .filter(r => r._deleted || !(r.min_score === "" && r.max_score === "" && r.letter === "" && r.gpa === ""));
-  }, [editBands]);
+      .filter(r => !r._deleted);
 
-  const editErrors = useMemo(() => {
-    const errs = [];
-    const isNum = (x) => typeof x === "number" && !Number.isNaN(x);
-    const activeRows = editNormalized.filter(r => !r._deleted);
-
-    // seed errs for visual mapping by original index
-    editBands.forEach(()=>errs.push({}));
-
-    activeRows.forEach((r) => {
-      const idx = editNormalized.indexOf(r);
+    // Field-level checks
+    for (const row of active) {
       const e = {};
-      if (!isNum(r.min_score) || r.min_score < 0 || r.min_score > 100) e.min = 1;
-      if (!isNum(r.max_score) || r.max_score < 0 || r.max_score > 100) e.max = 1;
-      if (isNum(r.min_score) && isNum(r.max_score) && r.min_score > r.max_score) e.range = 1;
-      if (!r.letter) e.letter = 1;
-      if (!(typeof r.gpa === "number" && !Number.isNaN(r.gpa))) e.gpa = 1;
-      errs[idx] = e;
-    });
+      if (!isNum(row.min_score) || row.min_score < 0 || row.min_score > 100) e.min = 1;
+      if (!isNum(row.max_score) || row.max_score < 0 || row.max_score > 100) e.max = 1;
+      if (isNum(row.min_score) && isNum(row.max_score) && row.min_score > row.max_score) e.range = 1;
+      if (!row.letter) e.letter = 1;
+      if (!(typeof row.gpa === "number" && !Number.isNaN(row.gpa))) e.gpa = 1;
+      errs[row.i] = e;
+    }
 
-    const sorted = activeRows.map((r, i)=>({ ...r, __i:i }))
+    // duplicates (letter + exact range)
+    const byLetter = new Map();
+    const byRange = new Map();
+    active.forEach((r) => {
+      if (r.letter) {
+        const list = byLetter.get(r.letter) || [];
+        byLetter.set(r.letter, [...list, r.i]);
+      }
+      if (Number.isFinite(r.min_score) && Number.isFinite(r.max_score)) {
+        const key = `${r.min_score}-${r.max_score}`;
+        const list = byRange.get(key) || [];
+        byRange.set(key, [...list, r.i]);
+      }
+    });
+    for (const [, idxs] of byLetter) {
+      if (idxs.length > 1) idxs.forEach(i => (errs[i].dupLetter = 1));
+    }
+    for (const [, idxs] of byRange) {
+      if (idxs.length > 1) idxs.forEach(i => (errs[i].dupRange = 1));
+    }
+
+    // overlap (any shared marks between bands)
+    const sorted = [...active]
+      .filter(r => Number.isFinite(r.min_score) && Number.isFinite(r.max_score))
       .sort((a,b)=>a.min_score-b.min_score);
-    for (let k=1;k<sorted.length;k++){
-      const a=sorted[k-1], b=sorted[k];
+    for (let k=1; k<sorted.length; k++){
+      const a = sorted[k-1], b = sorted[k];
       if (a.max_score >= b.min_score) {
-        errs[editNormalized.indexOf(a)].overlap = 1;
-        errs[editNormalized.indexOf(b)].overlap = 1;
+        (errs[a.i] ||= {}).overlap = 1;
+        (errs[b.i] ||= {}).overlap = 1;
       }
     }
     return errs;
-  }, [editBands, editNormalized]);
+  }, [editBands]);
+
+  const hasEditWarnings = useMemo(
+    () => editErrors.some(e => e.overlap || e.dupLetter || e.dupRange),
+    [editErrors]
+  );
 
   const canSaveEdit = useMemo(() => {
     if (!editingId) return false;
-    const activeRows = editNormalized.filter(r => !r._deleted);
-    const okRows = activeRows.length > 0 && editErrors.every(e => Object.keys(e).length === 0);
+    const activeRows = editBands.filter(r => !r._deleted);
+    // hard errors block save; warnings don’t
+    const okRows = activeRows.length > 0 && editErrors.every(e => {
+      const { min, max, range, letter, gpa } = e;
+      return !(min || max || range || letter || gpa);
+    });
     return !!editName.trim() && okRows;
-  }, [editingId, editName, editNormalized, editErrors]);
+  }, [editingId, editName, editBands, editErrors]);
 
   const saveEdit = async () => {
-    if (!canSaveEdit) { toast.error("Fix errors first"); return; }
+    if (!canSaveEdit) {
+      toast.error("Fix the red errors first.");
+      return;
+    }
+    if (hasEditWarnings) {
+      toast((t) => (
+        <div>
+          <div className="font-semibold mb-1">Warning</div>
+          <div className="text-sm">Some bands overlap or duplicate. Continue?</div>
+          <div className="mt-2 flex gap-2">
+            <button
+              className="px-2 py-1 rounded bg-rose-600 text-white"
+              onClick={() => toast.dismiss(t.id)}
+            >
+              Review
+            </button>
+            <button
+              className="px-2 py-1 rounded bg-emerald-600 text-white"
+              onClick={async () => {
+                toast.dismiss(t.id);
+                await doSaveEdit();
+              }}
+            >
+              Save anyway
+            </button>
+          </div>
+        </div>
+      ), { duration: 6000 });
+      return;
+    }
+    await doSaveEdit();
+  };
+
+  const doSaveEdit = async () => {
     setSavingEdit(true);
     try {
-      // 1) update scale name (and keep is_active as is)
+      // 1) update scale name (keep is_active as is)
       await AxiosInstance.patch(`grade-scales/${editingId}/`, { name: editName.trim() });
 
       // 2) upsert/delete bands
-      for (const r of editNormalized) {
+      for (let i = 0; i < editBands.length; i++) {
+        const r = editBands[i];
         if (r._deleted && r.id) {
           await AxiosInstance.delete(`grade-bands/${r.id}/`);
           continue;
         }
         if (r._deleted && !r.id) continue; // brand new row marked delete
+
+        // normalize values for persist
+        const min = r.min_score === "" ? null : Number(r.min_score);
+        const max = r.max_score === "" ? null : Number(r.max_score);
+        const gpa = r.gpa === "" ? null : Number(r.gpa);
+        const letter = (r.letter || "").toUpperCase().trim();
+
         if (r.id) {
           await AxiosInstance.patch(`grade-bands/${r.id}/`, {
-            min_score: r.min_score,
-            max_score: r.max_score,
-            letter: r.letter,
-            gpa: r.gpa,
+            min_score: min,
+            max_score: max,
+            letter,
+            gpa,
           });
         } else {
           await AxiosInstance.post("grade-bands/", {
             scale: editingId,
-            min_score: r.min_score,
-            max_score: r.max_score,
-            letter: r.letter,
-            gpa: r.gpa,
+            min_score: min,
+            max_score: max,
+            letter,
+            gpa,
           });
         }
       }
@@ -234,20 +386,26 @@ export default function GradeScaleManager() {
       cancelEdit();
       await load();
     } catch (e) {
-      const msg = e?.response?.data?.detail || "Update failed";
+      const msg =
+        e?.response?.data?.detail ||
+        (typeof e?.response?.data === "string" ? e.response.data : "Update failed");
       toast.error(String(msg));
     } finally {
       setSavingEdit(false);
     }
   };
 
-  // ---------- UI helpers ----------
+  // ───────────────────────────────────────────────────────────────────────────
+  // UI helpers
+  // ───────────────────────────────────────────────────────────────────────────
   const rowErrText = (e) =>
     [
       e.min && "Min 0–100",
       e.max && "Max 0–100",
       e.range && "Min ≤ Max",
       e.overlap && "Overlaps another band",
+      e.dupLetter && "Duplicate letter",
+      e.dupRange && "Duplicate exact range",
       e.letter && "Letter required",
       e.gpa && "GPA must be a number",
     ].filter(Boolean).join(" • ");
