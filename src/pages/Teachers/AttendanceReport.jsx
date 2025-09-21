@@ -1,10 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import Axios from "../../components/AxiosInstance";
+import AttendanceSheet from "./AttendanceSheet";
 
 export default function AttendanceReport() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
 
+  // Sheet modal
+  const [sheetOpen, setSheetOpen] = useState(false);
+
+  // Filters
   const [classes, setClasses] = useState([]);
   const [sections, setSections] = useState([]);
   const [subjects, setSubjects] = useState([]);
@@ -14,6 +19,7 @@ export default function AttendanceReport() {
   const [selectedSubjectId, setSelectedSubjectId] = useState("");
   const [date, setDate] = useState("");
 
+  // Labels
   const selectedClass = useMemo(
     () => classes.find(c => String(c.id) === String(selectedClassId)),
     [classes, selectedClassId]
@@ -39,12 +45,12 @@ export default function AttendanceReport() {
     })();
   }, []);
 
-  // When class changes, set sections and reset selections
+  // When class changes, set sections and reset lower selections
   useEffect(() => {
     const cls = classes.find(c => String(c.id) === String(selectedClassId));
     setSections(cls?.sections || []);
     setSelectedSectionId("");
-    setSubjects([]);    // reset until we recompute subjects
+    setSubjects([]);
     setSelectedSubjectId("");
   }, [selectedClassId, classes]);
 
@@ -57,14 +63,12 @@ export default function AttendanceReport() {
         return;
       }
       try {
-        // Pull teacher's timetable rows then extract unique subjects for this class+section
         const res = await Axios.get("timetable/", {
           params: { class_id: selectedClassId, section_id: selectedSectionId },
         });
         const items = Array.isArray(res.data) ? res.data : res.data?.results || [];
         const uniq = new Map();
         for (const r of items) {
-          // expecting r.subject (id) + r.subject_label
           const id = r.subject || r.subject_id;
           const name = r.subject_label || r.subject_name || "";
           if (id && !uniq.has(id)) uniq.set(id, { id, name });
@@ -77,6 +81,7 @@ export default function AttendanceReport() {
     })();
   }, [selectedClassId, selectedSectionId]);
 
+  // Load attendance (exact date)
   const load = async () => {
     if (!selectedClassId || !selectedSectionId || !selectedSubjectId || !date) return;
     setLoading(true);
@@ -98,14 +103,16 @@ export default function AttendanceReport() {
     }
   };
 
+  // Update a record locally
   const updateRow = (idx, field, value) => {
     setRows(r => r.map((row, i) => (i === idx ? { ...row, [field]: value } : row)));
   };
 
+  // Save a single record
   const saveRow = async (row) => {
     try {
       await Axios.patch(`attendance/${row.id}/`, { status: row.status, remarks: row.remarks });
-      // toast success if you have one
+      // optionally toast success
     } catch (e) {
       console.error("Failed to save", e);
     }
@@ -115,7 +122,7 @@ export default function AttendanceReport() {
     <div className="max-w-6xl">
       <h1 className="text-2xl font-bold mb-4">Attendance Report</h1>
 
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-3 mb-4">
+      <div className="grid grid-cols-1 md:grid-cols-6 gap-3 mb-4">
         <div>
           <label className="block text-sm font-medium mb-1">Class</label>
           <select
@@ -171,6 +178,16 @@ export default function AttendanceReport() {
             disabled={!selectedClassId || !selectedSectionId || !selectedSubjectId || !date || loading}
           >
             {loading ? "Loading…" : "Load Report"}
+          </button>
+        </div>
+
+        <div className="flex items-end">
+          <button
+            className="btn btn-secondary w-full"
+            onClick={() => setSheetOpen(true)}
+            disabled={!selectedClassId || !selectedSectionId}
+          >
+            Open Attendance Sheet
           </button>
         </div>
       </div>
@@ -236,6 +253,17 @@ export default function AttendanceReport() {
           </tbody>
         </table>
       </div>
+
+      {/* Attendance Sheet modal (monthly grid + download) */}
+      {sheetOpen && (
+        <AttendanceSheet
+          open={sheetOpen}
+          onClose={() => setSheetOpen(false)}
+          classId={selectedClassId}
+          sectionId={selectedSectionId}
+          subjectId={selectedSubjectId}  // optional; remove if you want combined subjects
+        />
+      )}
     </div>
   );
 }

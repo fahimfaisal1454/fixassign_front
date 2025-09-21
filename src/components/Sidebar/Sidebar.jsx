@@ -218,7 +218,12 @@ export default function Sidebar() {
               <MdLibraryBooks className="text-lg" />
               {!collapsed && "Assign Subject"}
             </NavLink>
-
+              
+              <NavLink to="/dashboard/student-attendance" className={navLinkStyle}>
+              <MdLibraryBooks className="text-lg" />
+              {!collapsed && "Students Attendance"}
+            </NavLink>
+              
             {/* Existing academic items */}
             <NavLink to="/dashboard/assigned-teacher-list" className={navLinkStyle}>
               <FaRegCalendarAlt className="text-lg" />
@@ -228,6 +233,21 @@ export default function Sidebar() {
               <FaRegCalendarAlt className="text-lg" />
               {!collapsed && "Add Result"}
             </NavLink>
+            <NavLink to="/dashboard/student-promotion" className={navLinkStyle}>
+              <FaRegCalendarAlt className="text-lg" />
+              {!collapsed && "Student Promotion"}
+            </NavLink>
+              <NavLink to="/dashboard/grade-scales" className={navLinkStyle}>
+            <MdLibraryBooks className="text-lg" />
+             {!collapsed && "Grade Scales"}
+           </NavLink>
+
+            <NavLink to="/dashboard/exams-admin" className={navLinkStyle}>
+            <MdLibraryBooks className="text-lg" />
+             {!collapsed && "Exams (Admin)"}
+           </NavLink>    
+
+
           </div>
         </div>
       </div>

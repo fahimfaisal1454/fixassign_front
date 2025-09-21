@@ -46,7 +46,10 @@ import ClassTimetable from "./pages/DashboardPages/academics/ClassTimetable.jsx"
 // import AssignTeacherForm from "./pages/DashboardPages/academics/AssignTeacherForm.jsx";
 // import AssignTeacherList from "./pages/DashboardPages/academics/AssignTeacherList.jsx";
 import ManageClassrooms from "./pages/DashboardPages/academics/ManageClassrooms.jsx";
-
+import StudentAttendance from "./pages/DashboardPages/academics/StudentAttendance.jsx";
+import StudentPromotion from "./pages/DashboardPages/academics/StudentPromotion.jsx";
+import GradeScaleManager from "./pages/DashboardPages/academics/GradeScaleManager.jsx";
+import ExamsAdmin from "./pages/DashboardPages/academics/ExamsAdmin.jsx";
 
 /* === Teacher Panel imports (new) === */
 import TeacherPanel from "./Layout/TeacherPanel.jsx";
@@ -61,6 +64,7 @@ import TeacherNotices from "./pages/Teachers/Notices.jsx";
 import MyStudents from "./pages/Teachers/MyStudents.jsx";
 import TeacherRoutine from "./pages/Teachers/TeacherRoutine.jsx";
 import AttendanceReport from "./pages/Teachers/AttendanceReport";
+import AttendanceSheet from "./pages/Teachers/AttendanceSheet.jsx";
 
 
 /* === Student Panel imports (new) === */
@@ -165,6 +169,10 @@ const router = createBrowserRouter([
       // { path: "assigned-teacher-list", element: <AssignTeacherList /> },
       { path: "link-account", element: <LinkAccount /> },
       { path: "periods", element: <ManagePeriods /> }, 
+      { path: "student-attendance", element: <StudentAttendance /> },
+       { path: "student-promotion", element: <StudentPromotion /> },
+       { path: "grade-scales", element: <GradeScaleManager /> },
+       { path: "exams-admin", element: <ExamsAdmin /> },
     ],
   },
 
@@ -188,7 +196,8 @@ const router = createBrowserRouter([
       { path: "profile", element: <MyProfile /> },
       { path: "routine", element: <TeacherRoutine /> },
       { path: "attendance-report", element: <AttendanceReport /> },
-      
+      { path: "attendance-sheet", element: <AttendanceSheet /> },
+     
       
     ],
   },

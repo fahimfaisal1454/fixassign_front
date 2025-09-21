@@ -29,7 +29,7 @@ export default function Attendance() {
   const [selectedSectionId, setSelectedSectionId] = useState("");
   const [selectedSubjectId, setSelectedSubjectId] = useState("");
   const [weekday, setWeekday] = useState(() => weekdayFromDate(new Date().toISOString().slice(0,10)));
-  const [periodId, setPeriodId] = useState("");  // the final timetable id when multiple periods match
+  const [periodId, setPeriodId] = useState("");  // final timetable id when multiple periods match
 
   // timetable + rows
   const [slots, setSlots] = useState([]);
@@ -107,10 +107,7 @@ export default function Attendance() {
         slotSubjectId(s) === String(selectedSubjectId) &&
         slotDayName(s)   === String(weekday)
       )
-      .map(s => ({
-        id: s.id,
-        label: `${s.start_time}-${s.end_time}`,
-      }));
+      .map(s => ({ id: s.id, label: `${s.start_time}-${s.end_time}` }));
   }, [slots, selectedClassId, selectedSectionId, selectedSubjectId, weekday]);
 
   // auto-select period when there is exactly one
@@ -119,43 +116,61 @@ export default function Attendance() {
     else setPeriodId("");
   }, [periodOptions.length]);
 
-  // 7) load roster for the final timetable id + date
+  // 7) LOAD roster like AttendanceReport: merge students + attendance list
   const loadRoster = async () => {
-    if (!date || !selectedClassId || !selectedSectionId || !selectedSubjectId || !weekday) return;
-
-    // require a specific period if multiple match
-    let finalTimetableId = periodId;
-    if (!finalTimetableId) {
-      if (periodOptions.length === 1) finalTimetableId = String(periodOptions[0].id);
-      else return; // not enough info (user must choose a period)
-    }
-
+    if (!date || !selectedClassId || !selectedSectionId || !selectedSubjectId) return;
     setLoading(true);
     try {
-      const { data } = await Axios.get("attendance/roster/", {
-        params: { timetable_id: finalTimetableId, date },
+      // 1) all students (source of truth for full_name)
+      const stuReq = Axios.get("students/", {
+        params: { class_id: selectedClassId, section_id: selectedSectionId },
       });
-      const list = Array.isArray(data?.rows) ? data.rows : [];
-      setRows(list.map(r => ({
-        student: r.student,
-        student_name: r.student_name || "",
-        status: r.status || "PRESENT",
-        remarks: r.remarks || "",
-        attendance_id: r.attendance_id ?? null,
-      })));
+      // 2) existing attendance (exact date)
+      const attReq = Axios.get("attendance/", {
+        params: {
+          class_id: selectedClassId,
+          section_id: selectedSectionId,
+          subject_id: selectedSubjectId,
+          date,
+        },
+      });
+
+      const [stuRes, attRes] = await Promise.all([stuReq, attReq]);
+      const students = Array.isArray(stuRes.data) ? stuRes.data : stuRes.data?.results || [];
+      const records  = Array.isArray(attRes.data) ? attRes.data : attRes.data?.results || [];
+
+      const bySid = new Map(records.map(r => [String(r.student), r]));
+
+      const merged = students.map(s => {
+        const rec = bySid.get(String(s.id));
+        return {
+          student: s.id,
+          student_name: s.full_name || s.name || "",   // <-- FULL NAME
+          status: rec?.status || "PRESENT",
+          remarks: rec?.remarks || "",
+          attendance_id: rec?.id ?? null,
+        };
+      });
+
+      setRows(merged);
     } catch (e) {
-      console.error("Roster load failed", e);
+      console.error("Roster/records load failed", e);
       setRows([]);
     } finally {
       setLoading(false);
     }
   };
 
-  // 8) save roster (bulk)
+  // 8) SAVE roster (bulk) via attendance/roster/
   const save = async () => {
     if (!rows.length) return;
+
+    // For saving, we still require an actual timetable slot (period)
     let finalTimetableId = periodId || (periodOptions.length === 1 ? String(periodOptions[0].id) : "");
-    if (!finalTimetableId) return;
+    if (!finalTimetableId) {
+      alert("Please select the period/time before saving.");
+      return;
+    }
 
     setSaving(true);
     try {
@@ -164,7 +179,7 @@ export default function Attendance() {
         date,
         rows: rows.map(({ student, status, remarks }) => ({ student, status, remarks })),
       });
-      await loadRoster(); // refresh rows to pick up any new IDs
+      await loadRoster(); // refresh to pick up any new IDs
     } catch (e) {
       console.error("Save failed", e);
     } finally {
@@ -230,7 +245,7 @@ export default function Attendance() {
         </div>
 
         <div>
-          <label className="block text-sm font-medium mb-1">Day of week</label>
+          <label className="block text-sm font-medium mb-1">Day of week (for saving)</label>
           <select
             className="select select-bordered w-full"
             value={weekday}
@@ -242,7 +257,7 @@ export default function Attendance() {
           </select>
         </div>
 
-        {/* Period (start-end) only when there are multiple matches */}
+        {/* Period (start-end) only matters when saving and there are multiple matches */}
         {(selectedClassId && selectedSectionId && selectedSubjectId && weekday) && (
           <div className="md:col-span-2">
             <label className="block text-sm font-medium mb-1">Period (time)</label>
@@ -266,7 +281,8 @@ export default function Attendance() {
           <button
             className="btn btn-primary w-full"
             onClick={loadRoster}
-            disabled={!date || !selectedClassId || !selectedSectionId || !selectedSubjectId || !weekday || (periodOptions.length > 1 && !periodId) || loading}
+            // Weekday/period NOT required to load (only required to save)
+            disabled={!date || !selectedClassId || !selectedSectionId || !selectedSubjectId || loading}
           >
             {loading ? "Loading…" : "Load Roster"}
           </button>
@@ -324,8 +340,6 @@ export default function Attendance() {
                 {!selectedClassId ? "Pick a class to begin." :
                  !selectedSectionId ? "Pick a section." :
                  !selectedSubjectId ? "Pick a subject." :
-                 !weekday ? "Pick a day of week." :
-                 (periodOptions.length > 1 && !periodId) ? "Pick a period/time." :
                  "No students found for this selection."}
               </td></tr>
             )}

@@ -6,7 +6,9 @@ import { Toaster, toast } from "react-hot-toast";
 
 const required = (v) => v !== null && v !== undefined && String(v).trim() !== "";
 
-/** Small avatar helper */
+// keep react-select menus above sticky table/header/overflows
+const menuPortalTarget = typeof document !== "undefined" ? document.body : null;
+
 function AvatarCircle({ name, src, size = 36 }) {
   if (src) {
     return (
@@ -34,35 +36,36 @@ function AvatarCircle({ name, src, size = 36 }) {
   );
 }
 
-/** Build a username from a name (lowercase, remove non-alphanum, collapse spaces) */
 function slugifyName(name) {
   return String(name || "")
     .toLowerCase()
     .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "") // strip accents
-    .replace(/[^a-z0-9]+/g, "") // only letters+digits
-    .slice(0, 24); // keep it short-ish
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "")
+    .slice(0, 24);
 }
 
 export default function StudentInfo() {
   // data
   const [students, setStudents] = useState([]);
-  const [classes, setClasses] = useState([]); // [{id, name, sections:[{id,name}]}]
+  const [classes, setClasses] = useState([]); // [{id,name,year,sections_detail:[{id,name}]}]
   const [classToSections, setClassToSections] = useState({});
+  const [sectionsDict, setSectionsDict] = useState({});
 
   // ui
-  const [loading, setLoading] = useState(true); // initial page load
-  const [tableBusy, setTableBusy] = useState(false); // list refresh spinner
+  const [loading, setLoading] = useState(true);
+  const [tableBusy, setTableBusy] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [submitting, setSubmitting] = useState(false);
 
   // filters
   const [searchTerm, setSearchTerm] = useState("");
+  const [filterYear, setFilterYear] = useState(null);
   const [filterClassId, setFilterClassId] = useState(null);
   const [filterSectionId, setFilterSectionId] = useState(null);
 
-  // form (student)
+  // form
   const [form, setForm] = useState({
     full_name: "",
     roll_number: "",
@@ -75,12 +78,12 @@ export default function StudentInfo() {
     contact_email: "",
     contact_phone: "",
     photo: null,
-    user: null, // if already linked
+    user: null,
   });
   const [preview, setPreview] = useState(null);
   const [touched, setTouched] = useState({});
 
-  // form (user at bottom)
+  // user form
   const [createLogin, setCreateLogin] = useState(false);
   const [userForm, setUserForm] = useState({
     username: "",
@@ -90,22 +93,40 @@ export default function StudentInfo() {
     is_active: true,
     must_change_password: true,
   });
-
-  // Username generation + availability
-  const [userEditedUsername, setUserEditedUsername] = useState(false); // if admin manually typed username
-  const [usernameAvailable, setUsernameAvailable] = useState(null); // true/false/null
+  const [userEditedUsername, setUserEditedUsername] = useState(false);
+  const [usernameAvailable, setUsernameAvailable] = useState(null);
   const [checkingUsername, setCheckingUsername] = useState(false);
-  const [usernameNote, setUsernameNote] = useState(""); // hint/suggestion text
+  const [usernameNote, setUsernameNote] = useState("");
 
   // pagination
   const [page, setPage] = useState(1);
   const pageSize = 12;
 
-  // options
-  const classOptions = useMemo(
-    () => classes.map((c) => ({ value: c.id, label: c.name })),
-    [classes]
+  // ---- helpers for classes/years ----
+  const years = useMemo(() => {
+    const set = new Set();
+    classes.forEach((c) => c.year && set.add(Number(c.year)));
+    return Array.from(set).sort((a, b) => b - a);
+  }, [classes]);
+
+  const yearOptions = useMemo(
+    () => years.map((y) => ({ value: y, label: String(y) })),
+    [years]
   );
+
+  const classesById = useMemo(() => {
+    const m = {};
+    classes.forEach((c) => (m[c.id] = { name: c.name, year: c.year }));
+    return m;
+  }, [classes]);
+
+  // ⬇️ No year in labels any more
+  const classOptions = useMemo(() => {
+    const list = filterYear
+      ? classes.filter((c) => Number(c.year) === Number(filterYear))
+      : classes;
+    return list.map((c) => ({ value: c.id, label: c.name }));
+  }, [classes, filterYear]);
 
   const filterSectionOptions = useMemo(() => {
     if (!filterClassId) return [];
@@ -119,34 +140,53 @@ export default function StudentInfo() {
     return secs.map((s) => ({ value: s.id, label: s.name }));
   }, [form.class_name, classToSections]);
 
-  // maps for display
-  const classMap = useMemo(() => {
-    const m = {};
-    classes.forEach((c) => (m[c.id] = c.name));
-    return m;
-  }, [classes]);
-
   const sectionNameById = useMemo(() => {
     const m = {};
     Object.values(classToSections).forEach((arr) =>
       arr.forEach((s) => (m[s.id] = s.name))
     );
+    for (const [id, name] of Object.entries(sectionsDict)) {
+      if (!m[id]) m[id] = name;
+    }
     return m;
-  }, [classToSections]);
+  }, [classToSections, sectionsDict]);
 
   // initial load
   useEffect(() => {
     (async () => {
       try {
         setLoading(true);
-        const [studentsRes, classNamesRes] = await Promise.all([
+        const [studentsRes, classesRes] = await Promise.all([
           axiosInstance.get("students/"),
-          axiosInstance.get("class-names/"),
+          axiosInstance.get("classes/"),
         ]);
-        const cls = Array.isArray(classNamesRes.data) ? classNamesRes.data : [];
+
+        const clsRaw = Array.isArray(classesRes.data)
+          ? classesRes.data
+          : classesRes.data?.results || [];
+
+        // if sections_detail missing, fetch names from /sections/
+        let sectionsMap = {};
+        if (clsRaw.some((c) => !Array.isArray(c.sections_detail))) {
+          try {
+            const secRes = await axiosInstance.get("sections/");
+            const arr = Array.isArray(secRes.data) ? secRes.data : [];
+            sectionsMap = Object.fromEntries(arr.map((s) => [String(s.id), s.name]));
+          } catch {}
+        }
+
         const map = {};
-        cls.forEach((c) => (map[c.id] = Array.isArray(c.sections) ? c.sections : []));
-        setClasses(cls);
+        clsRaw.forEach((c) => {
+          const detail = Array.isArray(c.sections_detail) ? c.sections_detail : null;
+          const ids = Array.isArray(c.sections) ? c.sections : [];
+          const secs = detail
+            ? detail.map((s) => ({ id: s.id, name: s.name }))
+            : ids.map((id) => ({ id, name: sectionsMap[String(id)] || `#${id}` }));
+          map[c.id] = secs;
+        });
+
+        setSectionsDict(sectionsMap);
+        setClasses(clsRaw);
         setClassToSections(map);
         setStudents(studentsRes.data || []);
       } catch (e) {
@@ -158,22 +198,31 @@ export default function StudentInfo() {
     })();
   }, []);
 
-  // derived list for table
+  // derived list for table (year → class → section)
   const filtered = useMemo(() => {
     let out = Array.isArray(students) ? [...students] : [];
+
     if (searchTerm.trim()) {
       const needle = searchTerm.trim().toLowerCase();
       out = out.filter((s) => String(s.full_name || "").toLowerCase().includes(needle));
     }
+
+    if (filterYear) {
+      out = out.filter(
+        (s) => Number(classesById[s.class_name]?.year) === Number(filterYear)
+      );
+    }
     if (filterClassId) out = out.filter((s) => Number(s.class_name) === Number(filterClassId));
     if (filterSectionId) out = out.filter((s) => Number(s.section) === Number(filterSectionId));
+
     return out;
-  }, [students, searchTerm, filterClassId, filterSectionId]);
+  }, [students, searchTerm, filterYear, filterClassId, filterSectionId, classesById]);
 
   const totalPages = Math.ceil(filtered.length / pageSize) || 1;
   const pageRows = useMemo(() => {
     const start = (page - 1) * pageSize;
     return filtered.slice(start, start + pageSize);
+    // eslint-disable-next-line
   }, [filtered, page]);
 
   // helpers
@@ -258,7 +307,6 @@ export default function StudentInfo() {
     setModalOpen(true);
   };
 
-  // general form handlers
   const onChangeField = (e) => {
     const { name, value, type, files } = e.target;
     if (type === "file") {
@@ -275,10 +323,9 @@ export default function StudentInfo() {
   };
   const onBlur = (key) => setTouched((t) => ({ ...t, [key]: true }));
 
-  // Auto-generate username from full name while *not* manually edited
   useEffect(() => {
-    if (!createLogin) return; // only when creating/updating login
-    if (userEditedUsername) return; // don't override admin's manual edits
+    if (!createLogin) return;
+    if (userEditedUsername) return;
     if (!form.full_name) {
       setUserForm((u) => ({ ...u, username: "" }));
       setUsernameAvailable(null);
@@ -289,7 +336,6 @@ export default function StudentInfo() {
     setUserForm((u) => (u.username === suggestion ? u : { ...u, username: suggestion }));
   }, [form.full_name, createLogin, userEditedUsername]);
 
-  // Debounced availability check
   useEffect(() => {
     if (!createLogin) return;
     const uname = userForm.username?.trim();
@@ -309,31 +355,21 @@ export default function StudentInfo() {
         const available = !!data?.available;
         setUsernameAvailable(available);
         if (!available) {
-          // prefer server suggestion if provided
           const serverSug =
             (data?.suggestion && String(data.suggestion)) ||
             (data?.suggestions && Array.isArray(data.suggestions) && data.suggestions[0]);
           if (!userEditedUsername) {
-            // auto-apply suggestion only if user hasn't edited by hand
-            if (serverSug) {
-              setUserForm((u) => ({ ...u, username: serverSug }));
-              setUsernameNote("That username was taken. Suggested a free one.");
-            } else {
-              const fallback = `${uname}${Math.floor(100 + Math.random() * 900)}`;
-              setUserForm((u) => ({ ...u, username: fallback }));
-              setUsernameNote("That username was taken. Suggested a free one.");
-            }
+            setUserForm((u) => ({ ...u, username: serverSug || `${uname}${Math.floor(100 + Math.random() * 900)}` }));
+            setUsernameNote("That username was taken. Suggested a free one.");
           } else {
             setUsernameNote("Username is taken. Please pick another.");
           }
         } else {
           setUsernameNote("");
         }
-      } catch (e) {
-        if (!cancelled) {
-          setUsernameAvailable(null);
-          setUsernameNote("");
-        }
+      } catch {
+        setUsernameAvailable(null);
+        setUsernameNote("");
       } finally {
         if (!cancelled) setCheckingUsername(false);
       }
@@ -378,7 +414,6 @@ export default function StudentInfo() {
     }
 
     try {
-      // build payload
       const fd = new FormData();
       fd.append("full_name", form.full_name);
       fd.append("roll_number", String(form.roll_number));
@@ -407,7 +442,6 @@ export default function StudentInfo() {
         savedUserId = res?.data?.user || null;
       }
 
-      // optional user creation/update (bottom of form)
       if (createLogin) {
         if (!required(userForm.username)) {
           toast.error("Username is required for login.");
@@ -425,7 +459,7 @@ export default function StudentInfo() {
           if (userForm.password) patchPayload.password = userForm.password;
           await axiosInstance.patch(`admin/users/${savedUserId}/`, patchPayload);
         } else {
-          const createPayload = {
+          const payload = {
             username: userForm.username,
             email: userForm.email,
             phone: userForm.phone,
@@ -433,8 +467,8 @@ export default function StudentInfo() {
             is_active: userForm.is_active,
             must_change_password: userForm.must_change_password,
           };
-          if (userForm.password) createPayload.password = userForm.password;
-          const ures = await axiosInstance.post("admin/users/", createPayload);
+          if (userForm.password) payload.password = userForm.password;
+          const ures = await axiosInstance.post("admin/users/", payload);
           const newUserId = ures?.data?.id;
           await axiosInstance.post(`students/${savedStudentId}/link-user/`, { user_id: newUserId });
         }
@@ -462,9 +496,7 @@ export default function StudentInfo() {
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Students</h1>
-          <p className="text-sm text-slate-500">
-            Manage student records. Class & Section are required.
-          </p>
+          <p className="text-sm text-slate-500">Manage student records. Class &amp; Section are required.</p>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -485,7 +517,7 @@ export default function StudentInfo() {
       </div>
 
       {/* Filters */}
-      <div className="bg-white border rounded-2xl p-3 mb-4 grid grid-cols-1 md:grid-cols-4 gap-3">
+      <div className="bg-white border rounded-2xl p-3 mb-4 grid grid-cols-1 md:grid-cols-5 gap-3">
         <div className="md:col-span-2">
           <label className="block text-xs font-medium text-slate-600 mb-1">Search by name</label>
           <input
@@ -498,12 +530,40 @@ export default function StudentInfo() {
             }}
           />
         </div>
+
+        {/* Year */}
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">Year</label>
+          <Select
+            options={yearOptions}
+            isClearable
+            placeholder="All years"
+            value={yearOptions.find((o) => Number(o.value) === Number(filterYear)) || null}
+            onChange={(opt) => {
+              const y = opt ? Number(opt.value) : null;
+              setFilterYear(y);
+              setFilterClassId(null);
+              setFilterSectionId(null);
+              setPage(1);
+            }}
+            classNamePrefix="rs"
+            menuPortalTarget={menuPortalTarget}
+            menuPosition="fixed"
+            styles={{
+              control: (b) => ({ ...b, borderRadius: 12, paddingBlock: 2 }),
+              menu: (b) => ({ ...b, borderRadius: 12 }),
+              menuPortal: (b) => ({ ...b, zIndex: 9999 }),
+            }}
+          />
+        </div>
+
+        {/* Class */}
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1">Class</label>
           <Select
             options={classOptions}
             isClearable
-            placeholder="All classes"
+            placeholder={filterYear ? "All classes (year)" : "All classes"}
             value={classOptions.find((o) => Number(o.value) === Number(filterClassId)) || null}
             onChange={(opt) => {
               const cid = opt ? Number(opt.value) : null;
@@ -512,12 +572,17 @@ export default function StudentInfo() {
               setPage(1);
             }}
             classNamePrefix="rs"
+            menuPortalTarget={menuPortalTarget}
+            menuPosition="fixed"
             styles={{
-              control: (base) => ({ ...base, borderRadius: 12, paddingBlock: 2 }),
-              menu: (base) => ({ ...base, borderRadius: 12 }),
+              control: (b) => ({ ...b, borderRadius: 12, paddingBlock: 2 }),
+              menu: (b) => ({ ...b, borderRadius: 12 }),
+              menuPortal: (b) => ({ ...b, zIndex: 9999 }),
             }}
           />
         </div>
+
+        {/* Section */}
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1">Section</label>
           <Select
@@ -525,26 +590,29 @@ export default function StudentInfo() {
             isClearable
             placeholder={filterClassId ? "All sections" : "Pick class first"}
             isDisabled={!filterClassId}
-            value={
-              filterSectionOptions.find((o) => Number(o.value) === Number(filterSectionId)) || null
-            }
+            value={filterSectionOptions.find((o) => Number(o.value) === Number(filterSectionId)) || null}
             onChange={(opt) => {
               setFilterSectionId(opt ? Number(opt.value) : null);
               setPage(1);
             }}
             classNamePrefix="rs"
+            menuPortalTarget={menuPortalTarget}
+            menuPosition="fixed"
             styles={{
-              control: (base) => ({ ...base, borderRadius: 12, paddingBlock: 2 }),
-              menu: (base) => ({ ...base, borderRadius: 12 }),
+              control: (b) => ({ ...b, borderRadius: 12, paddingBlock: 2 }),
+              menu: (b) => ({ ...b, borderRadius: 12 }),
+              menuPortal: (b) => ({ ...b, zIndex: 9999 }),
             }}
           />
         </div>
       </div>
 
       {/* Table */}
-      <div className="overflow-x-auto rounded-2xl border bg-white shadow-sm">
+      {/* ⬇️ Make the wrapper the scroll container so the sticky header sticks inside it */}
+      <div className="relative max-h-[70vh] overflow-auto rounded-2xl border bg-white shadow-sm">
         <table className="min-w-full text-sm">
-          <thead className="bg-slate-100 sticky top-0 z-10">
+          {/* ⬇️ Sticky header scoped to the wrapper; solid background to avoid bleed-through */}
+          <thead className="sticky top-0 z-[1] bg-slate-100">
             <tr className="text-slate-700">
               <th className="py-3 px-4 text-left font-semibold">#</th>
               <th className="py-3 px-4 text-left font-semibold">Name</th>
@@ -590,7 +658,7 @@ export default function StudentInfo() {
                   <td className="py-3 px-4">{s.roll_number ?? "-"}</td>
                   <td className="py-3 px-4">
                     <span className="inline-flex items-center rounded-lg border px-2 py-0.5 text-xs font-medium">
-                      {s.class_name_label || classMap[s.class_name] || "-"}
+                      {s.class_name_label || classesById[s.class_name]?.name || "-"}
                     </span>
                   </td>
                   <td className="py-3 px-4">
@@ -650,7 +718,7 @@ export default function StudentInfo() {
         </div>
       )}
 
-      {/* Modal (scrollable) */}
+      {/* Modal */}
       {modalOpen && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-[1px] flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl relative max-h-[90vh] flex flex-col">
@@ -731,6 +799,8 @@ export default function StudentInfo() {
                     onBlur={() => onBlur("class_name")}
                     placeholder="Select class"
                     classNamePrefix="rs"
+                    menuPortalTarget={menuPortalTarget}
+                    menuPosition="fixed"
                     styles={{
                       control: (base) => ({
                         ...base,
@@ -741,7 +811,8 @@ export default function StudentInfo() {
                         boxShadow: "none",
                         "&:hover": { borderColor: "#60a5fa" },
                       }),
-                      menu: (base) => ({ ...base, borderRadius: 12 }),
+                      menu: (b) => ({ ...b, borderRadius: 12 }),
+                      menuPortal: (b) => ({ ...b, zIndex: 9999 }),
                     }}
                   />
                   {touched.class_name && form.class_name === null && (
@@ -768,6 +839,8 @@ export default function StudentInfo() {
                     isDisabled={!form.class_name}
                     isClearable={false}
                     classNamePrefix="rs"
+                    menuPortalTarget={menuPortalTarget}
+                    menuPosition="fixed"
                     styles={{
                       control: (base) => ({
                         ...base,
@@ -778,7 +851,8 @@ export default function StudentInfo() {
                         boxShadow: "none",
                         "&:hover": { borderColor: "#60a5fa" },
                       }),
-                      menu: (base) => ({ ...base, borderRadius: 12 }),
+                      menu: (b) => ({ ...b, borderRadius: 12 }),
+                      menuPortal: (b) => ({ ...b, zIndex: 9999 }),
                     }}
                   />
                   {touched.section && form.section === null && (
@@ -886,7 +960,7 @@ export default function StudentInfo() {
                 {/* Divider */}
                 <div className="md:col-span-2 h-px bg-slate-200 my-2" />
 
-                {/* USER REGISTRATION (BOTTOM) */}
+                {/* USER REGISTRATION */}
                 <label className="md:col-span-2 inline-flex items-center gap-2">
                   <input
                     type="checkbox"
@@ -961,9 +1035,7 @@ export default function StudentInfo() {
                         <input
                           type="checkbox"
                           checked={userForm.is_active}
-                          onChange={(e) =>
-                            setUserForm((u) => ({ ...u, is_active: e.target.checked }))
-                          }
+                          onChange={(e) => setUserForm((u) => ({ ...u, is_active: e.target.checked }))}
                         />
                         <span className="text-sm">Active</span>
                       </label>
@@ -981,7 +1053,6 @@ export default function StudentInfo() {
                   </>
                 )}
 
-                {/* Submit */}
                 <button
                   type="submit"
                   disabled={submitting}
