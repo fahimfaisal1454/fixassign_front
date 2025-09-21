@@ -13,6 +13,12 @@ const Chip = ({ children }) => (
 export default function AddSubject() {
   const [subjects, setSubjects] = useState([]);
   const [classes, setClasses] = useState([]);
+
+  // year controls (like AddClass)
+  const nowYear = new Date().getFullYear();
+  const [years, setYears] = useState([nowYear]);
+  const [selectedYear, setSelectedYear] = useState(nowYear);
+
   const [loading, setLoading] = useState(true);
 
   // in-flight flags
@@ -41,7 +47,7 @@ export default function AddSubject() {
     () =>
       (classes || []).map((c) => ({
         value: c.id,
-        label: c.name,
+        label: `${c.name}`, // name already tied to selectedYear
       })),
     [classes]
   );
@@ -52,32 +58,64 @@ export default function AddSubject() {
     return map;
   }, [classes]);
 
-  const loadAll = async () => {
+  // -------- Year-aware loaders (like AddClass) --------
+  const loadYears = async () => {
+    try {
+      const res = await axiosInstance.get("classes/years/");
+      const serverYearsRaw = Array.isArray(res.data) ? res.data : [];
+      const serverYears = serverYearsRaw.map((y) => Number(y)).filter((y) => !isNaN(y));
+      const allYears = Array.from(new Set([...serverYears, nowYear])).sort((a, b) => b - a);
+      setYears(allYears);
+      setSelectedYear((prev) => (allYears.includes(prev) ? prev : allYears[0]));
+    } catch (e) {
+      console.error(e);
+      // fall back to current year
+      setYears([nowYear]);
+      setSelectedYear(nowYear);
+    }
+  };
+
+  const loadYearData = async (year) => {
+    // fetch both subjects and classes for the chosen year
     setLoading(true);
     try {
       const [sRes, cRes] = await Promise.all([
-        axiosInstance.get("subjects/"),
-        axiosInstance.get("classes/"),
+        axiosInstance.get("subjects/", { params: { year } }),
+        axiosInstance.get("classes/", { params: { year } }),
       ]);
-      const clss = (cRes.data || []).sort((a, b) =>
-        (a.name || "").localeCompare(b.name || "")
+
+      // classes sorted alpha
+      const clss = (Array.isArray(cRes.data) ? cRes.data : cRes.data?.results || []).sort(
+        (a, b) => (a.name || "").localeCompare(b.name || "")
       );
-      const subs = (sRes.data || []).sort((a, b) =>
-        (a.name || "").localeCompare(b.name || "")
+
+      // subjects sorted alpha
+      const subs = (Array.isArray(sRes.data) ? sRes.data : sRes.data?.results || []).sort(
+        (a, b) => (a.name || "").localeCompare(b.name || "")
       );
-      setSubjects(subs);
+
       setClasses(clss);
+      setSubjects(subs);
     } catch (e) {
       console.error(e);
-      toast.error("Failed to load data");
+      toast.error(e?.response?.data?.detail || "Failed to load data");
     } finally {
       setLoading(false);
     }
   };
 
+  // initial + years
   useEffect(() => {
-    loadAll();
+    (async () => {
+      await loadYears();
+    })();
   }, []);
+
+  // whenever selectedYear changes, load that year's data and reset class filter
+  useEffect(() => {
+    setClassFilter(null);
+    if (selectedYear) loadYearData(selectedYear);
+  }, [selectedYear]);
 
   const filtered = useMemo(() => {
     let data = [...subjects];
@@ -86,9 +124,7 @@ export default function AddSubject() {
       data = data.filter((s) => (s.name || "").toLowerCase().includes(n));
     }
     if (classFilter?.value) {
-      data = data.filter(
-        (s) => String(s.class_name) === String(classFilter.value)
-      );
+      data = data.filter((s) => String(s.class_name) === String(classFilter.value));
     }
     return data;
   }, [subjects, q, classFilter]);
@@ -137,7 +173,7 @@ export default function AddSubject() {
         await axiosInstance.put(`subjects/${currentId}/`, payload);
         toast.success("Subject updated");
         setIsModalOpen(false);
-        await loadAll();
+        await loadYearData(selectedYear);
       } catch (e) {
         console.error(e);
         const msg =
@@ -153,14 +189,14 @@ export default function AddSubject() {
       return;
     }
 
-    // Create (multi-class)
+    // Create (multi-class) — classes are from the selected year
     if (!form.class_ids.length) {
       return toast.error("Please select at least one class");
     }
 
     setSaving(true);
     try {
-      // prevent duplicates: (subject name, class) pair
+      // prevent duplicates for current year: (subject name, class) pair
       const existingKey = new Set(
         subjects.map(
           (s) => `${String(s.class_name)}::${(s.name || "").toLowerCase()}`
@@ -194,7 +230,7 @@ export default function AddSubject() {
       }
 
       setIsModalOpen(false);
-      await loadAll();
+      await loadYearData(selectedYear);
     } catch (e) {
       console.error(e);
       const msg =
@@ -216,7 +252,7 @@ export default function AddSubject() {
     try {
       await axiosInstance.delete(`subjects/${id}/`);
       toast.success("Subject deleted");
-      await loadAll();
+      await loadYearData(selectedYear);
     } catch (e) {
       console.error(e);
       const msg = e?.response?.data?.detail || "Delete failed";
@@ -238,6 +274,22 @@ export default function AddSubject() {
         >
           Add Subject
         </button>
+      </div>
+
+      {/* View Year (like AddClass) */}
+      <div className="mb-4 flex items-center gap-3">
+        <label className="text-sm text-slate-600">View Year:</label>
+        <select
+          value={selectedYear}
+          onChange={(e) => setSelectedYear(Number(e.target.value))}
+          className="rounded-md border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        >
+          {years.map((y) => (
+            <option key={y} value={y}>
+              {y}
+            </option>
+          ))}
+        </select>
       </div>
 
       {/* Filters */}
@@ -356,9 +408,7 @@ export default function AddSubject() {
                 />
               </div>
 
-              {/* Class picker:
-                  - Create: multi-select classes (class_ids)
-                  - Edit: single-select class (class_name) */}
+              {/* Class picker (year-scoped) */}
               <div>
                 <label className="block text-sm mb-1 text-slate-700">
                   {isEditing ? "Class *" : "Classes *"}

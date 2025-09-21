@@ -50,7 +50,8 @@ import StudentAttendance from "./pages/DashboardPages/academics/StudentAttendanc
 import StudentPromotion from "./pages/DashboardPages/academics/StudentPromotion.jsx";
 import GradeScaleManager from "./pages/DashboardPages/academics/GradeScaleManager.jsx";
 import ExamsAdmin from "./pages/DashboardPages/academics/ExamsAdmin.jsx";
-
+// import AdminFinalizeButton from "./pages/AdminFinalizeButton.jsx";
+import AdminMarksViewer from "./pages/DashboardPages/academics/AdminMarksViewer.jsx"; 
 /* === Teacher Panel imports (new) === */
 import TeacherPanel from "./Layout/TeacherPanel.jsx";
 import TeacherDashboard from "./pages/Teachers/Dashboard.jsx";
@@ -173,6 +174,8 @@ const router = createBrowserRouter([
        { path: "student-promotion", element: <StudentPromotion /> },
        { path: "grade-scales", element: <GradeScaleManager /> },
        { path: "exams-admin", element: <ExamsAdmin /> },
+      //  { path: "finalize-marks", element: <AdminFinalizeButton /> },
+       { path: "view-marks", element: <AdminMarksViewer /> },
     ],
   },
 

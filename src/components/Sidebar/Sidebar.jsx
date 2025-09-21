@@ -3,14 +3,21 @@ import { useEffect, useState } from "react";
 import { Link, NavLink } from "react-router-dom";
 import { IoIosLogOut } from "react-icons/io";
 import { AiFillHome } from "react-icons/ai";
-import { MdSettings, MdExpandMore, MdExpandLess, MdClass, MdLibraryBooks } from "react-icons/md";
+import {
+  MdSettings,
+  MdExpandMore,
+  MdExpandLess,
+  MdClass,
+  MdLibraryBooks,
+  MdChevronLeft,
+  MdChevronRight,
+} from "react-icons/md";
 import { PiBuildingsDuotone } from "react-icons/pi";
 import { FiPhone } from "react-icons/fi";
 import { FaImages, FaUserTie, FaUserGraduate } from "react-icons/fa6";
-import { FaChalkboardTeacher } from "react-icons/fa";
+import { FaChalkboardTeacher, FaRegCalendarAlt, FaUniversity } from "react-icons/fa";
 import { RiTeamFill } from "react-icons/ri";
 import { BsClipboardData } from "react-icons/bs";
-import { FaRegCalendarAlt, FaUniversity } from "react-icons/fa";
 import { useUser } from "../../Provider/UseProvider";
 import AxiosInstance from "../AxiosInstance";
 
@@ -40,16 +47,28 @@ export default function Sidebar() {
     fetchInstitutionInfo();
   }, []);
 
-  // Default: white text; Active: black text; Hover: yellow bg, text stays white
+  // Consistent icon+label item styling
   const navLinkStyle = ({ isActive }) =>
     `flex items-center gap-3 px-3 py-2 rounded-md transition-all duration-200
      ${isActive ? "bg-[#d8f999] text-black" : "hover:bg-[#e2b42b] text-white hover:text-white"}
      ${collapsed ? "justify-center text-base px-1" : ""}`;
 
+  // Tiny helper for section labels in nested accordions
+  const SectionLabel = ({ children }) =>
+    collapsed ? null : (
+      <div className="mt-2 mb-1 text-[10px] uppercase tracking-wider text-white/80 pl-3 select-none">
+        {children}
+      </div>
+    );
+
+  // Divider line for visual grouping
+  const Divider = () => <div className={`${collapsed ? "mx-2" : "ml-3 mr-2"} h-px bg-white/20 my-2`} />;
+
   return (
     <aside
-      className={`h-screen bg-[#2C8E3F] text-white flex flex-col ${collapsed ? "w-16" : "w-64"
-        } transition-all duration-300`}
+      className={`h-screen bg-[#2C8E3F] text-white flex flex-col ${
+        collapsed ? "w-16" : "w-64"
+      } transition-all duration-300`}
     >
       {/* Top */}
       <div className="relative">
@@ -57,18 +76,20 @@ export default function Sidebar() {
           <Link to="/">
             <img
               src={institutionInfo?.logo || "/default-logo.png"}
-              className={`object-cover rounded-full transition-all duration-300 ${collapsed ? "w-10 h-10" : "w-12 h-12"
-                }`}
+              className={`object-cover rounded-full transition-all duration-300 ${
+                collapsed ? "w-10 h-10" : "w-12 h-12"
+              }`}
               alt="Logo"
             />
           </Link>
         </div>
         <button
           onClick={toggleSidebar}
-          className="absolute -right-3 top-1/2 -translate-y-1/2 bg-white text-purple-600 rounded-full shadow-md border border-purple-200 hover:bg-purple-100 w-6 h-6 flex items-center justify-center"
+          className="absolute -right-3 top-1/2 -translate-y-1/2 bg-white text-[#2C8E3F] rounded-full shadow-md border border-white/50 hover:bg-white/90 w-6 h-6 flex items-center justify-center"
           title={collapsed ? "Expand Sidebar" : "Collapse Sidebar"}
+          aria-label={collapsed ? "Expand Sidebar" : "Collapse Sidebar"}
         >
-          {collapsed ? "➡️" : "⬅️"}
+          {collapsed ? <MdChevronRight className="text-base" /> : <MdChevronLeft className="text-base" />}
         </button>
       </div>
 
@@ -89,8 +110,9 @@ export default function Sidebar() {
           </button>
 
           <div
-            className={`transition-all duration-300 overflow-hidden ${openId === "site" ? "max-h-[600px]" : "max-h-0"
-              } ${collapsed ? "pl-0" : "pl-4"}`}
+            className={`transition-all duration-300 overflow-hidden ${
+              openId === "site" ? "max-h-[600px]" : "max-h-0"
+            } ${collapsed ? "pl-0" : "pl-4"}`}
           >
             <NavLink to="/dashboard/college-info" className={navLinkStyle}>
               <PiBuildingsDuotone className="text-lg" />
@@ -143,8 +165,9 @@ export default function Sidebar() {
           </button>
 
           <div
-            className={`transition-all duration-300 overflow-hidden ${openId === "default" ? "max-h-[600px]" : "max-h-0"
-              } ${collapsed ? "pl-0" : "pl-4"}`}
+            className={`transition-all duration-300 overflow-hidden ${
+              openId === "default" ? "max-h-[600px]" : "max-h-0"
+            } ${collapsed ? "pl-0" : "pl-4"}`}
           >
             <NavLink to="/dashboard/student-info-form" className={navLinkStyle}>
               <FaUserGraduate className="text-lg" />
@@ -186,22 +209,12 @@ export default function Sidebar() {
           </button>
 
           <div
-            className={`transition-all duration-300 overflow-hidden ${openId === "academic" ? "max-h-[600px]" : "max-h-0"
-              } ${collapsed ? "pl-0" : "pl-4"}`}
+            className={`transition-all duration-300 overflow-hidden ${
+              openId === "academic" ? "max-h-[800px]" : "max-h-0"
+            } ${collapsed ? "pl-0" : "pl-4"}`}
           >
-            {/* ✅ Moved here */}
-            <NavLink to="/dashboard/class-timetable" className={navLinkStyle}>
-              <MdLibraryBooks className="text-lg" />
-              {!collapsed && "Class Timetable"}
-            </NavLink>
-            <NavLink to="/dashboard/periods" className={navLinkStyle}>
-              <MdLibraryBooks className="text-lg" />
-              {!collapsed && "Manage Periods"}
-            </NavLink>
-            <NavLink to="/dashboard/rooms" className={navLinkStyle}>
-              <MdLibraryBooks className="text-lg" />
-              {!collapsed && "Manage Classrooms"}
-            </NavLink>
+            {/* Group 1: Setup */}
+            <SectionLabel>Setup</SectionLabel>
             <NavLink to="/dashboard/add-section" className={navLinkStyle}>
               <MdClass className="text-lg" />
               {!collapsed && "Add Section"}
@@ -218,50 +231,82 @@ export default function Sidebar() {
               <MdLibraryBooks className="text-lg" />
               {!collapsed && "Assign Subject"}
             </NavLink>
-              
-              <NavLink to="/dashboard/student-attendance" className={navLinkStyle}>
+
+            <Divider />
+
+            {/* Group 2: Scheduling & Rooms */}
+            <SectionLabel>Scheduling & Rooms</SectionLabel>
+            <NavLink to="/dashboard/periods" className={navLinkStyle}>
               <MdLibraryBooks className="text-lg" />
-              {!collapsed && "Students Attendance"}
+              {!collapsed && "Manage Periods"}
             </NavLink>
-              
-            {/* Existing academic items */}
-            <NavLink to="/dashboard/assigned-teacher-list" className={navLinkStyle}>
+            <NavLink to="/dashboard/rooms" className={navLinkStyle}>
+              <MdLibraryBooks className="text-lg" />
+              {!collapsed && "Manage Classrooms"}
+            </NavLink>
+            <NavLink to="/dashboard/class-timetable" className={navLinkStyle}>
+              <MdLibraryBooks className="text-lg" />
+              {!collapsed && "Class Timetable"}
+            </NavLink>
+            
+            
+            {/* <NavLink to="/dashboard/assigned-teacher-list" className={navLinkStyle}>
               <FaRegCalendarAlt className="text-lg" />
               {!collapsed && "Class Routine"}
+            </NavLink> */}
+
+            <Divider />
+
+            {/* Group 3: Attendance & Assessment */}
+            <SectionLabel>Attendance & Assessment</SectionLabel>
+            <NavLink to="/dashboard/student-attendance" className={navLinkStyle}>
+              <MdLibraryBooks className="text-lg" />
+              {!collapsed && "Students Attendance"}
             </NavLink>
             <NavLink to="/dashboard/add-result" className={navLinkStyle}>
               <FaRegCalendarAlt className="text-lg" />
               {!collapsed && "Add Result"}
             </NavLink>
+            <NavLink to="/dashboard/grade-scales" className={navLinkStyle}>
+              <MdLibraryBooks className="text-lg" />
+              {!collapsed && "Grade Scales"}
+            </NavLink>
+            <NavLink to="/dashboard/exams-admin" className={navLinkStyle}>
+              <MdLibraryBooks className="text-lg" />
+              {!collapsed && "Exams (Admin)"}
+            </NavLink>
+            {/* <NavLink to="/dashboard/finalize-marks" className={navLinkStyle}>
+              <MdLibraryBooks className="text-lg" />
+              {!collapsed && "Finalize Marks"}
+            </NavLink> */}
+            <NavLink to="/dashboard/view-marks" className={navLinkStyle}>
+              <MdLibraryBooks className="text-lg" />
+              {!collapsed && "View Marks"}
+            </NavLink>
+
+            <Divider />
+
+            {/* Group 4: Promotion */}
+            <SectionLabel>Promotion</SectionLabel>
             <NavLink to="/dashboard/student-promotion" className={navLinkStyle}>
               <FaRegCalendarAlt className="text-lg" />
               {!collapsed && "Student Promotion"}
             </NavLink>
-              <NavLink to="/dashboard/grade-scales" className={navLinkStyle}>
-            <MdLibraryBooks className="text-lg" />
-             {!collapsed && "Grade Scales"}
-           </NavLink>
-
-            <NavLink to="/dashboard/exams-admin" className={navLinkStyle}>
-            <MdLibraryBooks className="text-lg" />
-             {!collapsed && "Exams (Admin)"}
-           </NavLink>    
-
-
           </div>
         </div>
       </div>
 
       {/* Bottom */}
-      <div className="px-2 py-4 border-t border-purple-700">
+      <div className="px-2 py-4 border-t border-white/30">
         <NavLink to="/" className={navLinkStyle}>
           <AiFillHome className="text-lg" />
           {!collapsed && "Home"}
         </NavLink>
 
         <button
-          className={`flex items-center gap-2 px-3 py-2 w-full rounded-md text-white hover:bg-[#e2b42b] hover:text-white transition-all duration-200 ${collapsed ? "justify-center" : ""
-            }`}
+          className={`flex items-center gap-2 px-3 py-2 w-full rounded-md text-white hover:bg-[#e2b42b] hover:text-white transition-all duration-200 ${
+            collapsed ? "justify-center" : ""
+          }`}
           title="Logout"
           onClick={handleLogout}
         >
