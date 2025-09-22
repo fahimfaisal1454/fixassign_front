@@ -1,6 +1,6 @@
 // src/pages/Admin/StudentInfo.jsx
 import { useEffect, useMemo, useState } from "react";
-import axiosInstance from "../../../components/AxiosInstance";
+import axiosInstance from "../../../components/AxiosInstance" // <-- fixed path
 import Select from "react-select";
 import { Toaster, toast } from "react-hot-toast";
 
@@ -45,10 +45,18 @@ function slugifyName(name) {
     .slice(0, 24);
 }
 
+// absolute URL helper for media paths
+const absUrl = (url) => {
+  if (!url) return null;
+  const isAbs = /^https?:\/\//i.test(url);
+  const base = (axiosInstance.defaults?.baseURL || "").replace(/\/+$/, "");
+  return isAbs ? url : `${base}${url.startsWith("/") ? "" : "/"}${url}`;
+};
+
 export default function StudentInfo() {
   // data
   const [students, setStudents] = useState([]);
-  const [classes, setClasses] = useState([]); // [{id,name,year,sections_detail:[{id,name}]}]
+  const [classes, setClasses] = useState([]); // [{id,name,year,sections:[{id,name}]}]
   const [classToSections, setClassToSections] = useState({});
   const [sectionsDict, setSectionsDict] = useState({});
 
@@ -120,7 +128,6 @@ export default function StudentInfo() {
     return m;
   }, [classes]);
 
-  // ⬇️ No year in labels any more
   const classOptions = useMemo(() => {
     const list = filterYear
       ? classes.filter((c) => Number(c.year) === Number(filterYear))
@@ -156,39 +163,61 @@ export default function StudentInfo() {
     (async () => {
       try {
         setLoading(true);
+
+        // Use existing endpoints from the rest of the app:
+        // - students/
+        // - class-names/ (includes embedded sections)
         const [studentsRes, classesRes] = await Promise.all([
           axiosInstance.get("students/"),
-          axiosInstance.get("classes/"),
+          axiosInstance.get("class-names/"), // <-- was "classes/"
         ]);
+
+        // normalize students + absolute photo
+        const studentsList = (Array.isArray(studentsRes.data) ? studentsRes.data : studentsRes.data?.results || [])
+          .map((s) => ({ ...s, photo: absUrl(s.photo) }));
 
         const clsRaw = Array.isArray(classesRes.data)
           ? classesRes.data
           : classesRes.data?.results || [];
 
-        // if sections_detail missing, fetch names from /sections/
+        // if sections are objects -> use directly; if ids -> name via /sections/
         let sectionsMap = {};
-        if (clsRaw.some((c) => !Array.isArray(c.sections_detail))) {
+        const anyIds =
+          clsRaw.some(
+            (c) =>
+              Array.isArray(c.sections) &&
+              c.sections.length &&
+              typeof c.sections[0] !== "object"
+          ) && clsRaw.length;
+
+        if (anyIds) {
           try {
             const secRes = await axiosInstance.get("sections/");
-            const arr = Array.isArray(secRes.data) ? secRes.data : [];
+            const arr = Array.isArray(secRes.data) ? secRes.data : secRes.data?.results || [];
             sectionsMap = Object.fromEntries(arr.map((s) => [String(s.id), s.name]));
-          } catch {}
+          } catch {
+            // ignore
+          }
         }
 
         const map = {};
         clsRaw.forEach((c) => {
-          const detail = Array.isArray(c.sections_detail) ? c.sections_detail : null;
-          const ids = Array.isArray(c.sections) ? c.sections : [];
-          const secs = detail
-            ? detail.map((s) => ({ id: s.id, name: s.name }))
-            : ids.map((id) => ({ id, name: sectionsMap[String(id)] || `#${id}` }));
+          const secs =
+            Array.isArray(c.sections) && c.sections.length
+              ? (typeof c.sections[0] === "object"
+                  ? c.sections.map((s) => ({ id: s.id, name: s.name }))
+                  : c.sections.map((id) => ({ id, name: sectionsMap[String(id)] || `#${id}` }))
+                )
+              : Array.isArray(c.sections_detail)
+              ? c.sections_detail.map((s) => ({ id: s.id, name: s.name }))
+              : [];
           map[c.id] = secs;
         });
 
         setSectionsDict(sectionsMap);
         setClasses(clsRaw);
         setClassToSections(map);
-        setStudents(studentsRes.data || []);
+        setStudents(studentsList);
       } catch (e) {
         console.error(e);
         toast.error("Failed to load data.");
@@ -230,7 +259,11 @@ export default function StudentInfo() {
     setTableBusy(true);
     try {
       const res = await axiosInstance.get("students/");
-      setStudents(res.data || []);
+      const list = (Array.isArray(res.data) ? res.data : res.data?.results || []).map((s) => ({
+        ...s,
+        photo: absUrl(s.photo),
+      }));
+      setStudents(list);
     } catch {
       toast.error("Refresh failed.");
     } finally {
@@ -292,7 +325,7 @@ export default function StudentInfo() {
       photo: null,
       user: s.user || null,
     });
-    setPreview(s.photo || null);
+    setPreview(absUrl(s.photo) || null);
     setCreateLogin(Boolean(s.user));
     setUserForm({
       username: (s.username || s.full_name || "").toLowerCase().replace(/\s+/g, ""),
@@ -608,10 +641,8 @@ export default function StudentInfo() {
       </div>
 
       {/* Table */}
-      {/* ⬇️ Make the wrapper the scroll container so the sticky header sticks inside it */}
       <div className="relative max-h-[70vh] overflow-auto rounded-2xl border bg-white shadow-sm">
         <table className="min-w-full text-sm">
-          {/* ⬇️ Sticky header scoped to the wrapper; solid background to avoid bleed-through */}
           <thead className="sticky top-0 z-[1] bg-slate-100">
             <tr className="text-slate-700">
               <th className="py-3 px-4 text-left font-semibold">#</th>

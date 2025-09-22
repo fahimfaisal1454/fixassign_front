@@ -15,6 +15,9 @@ export default function AssignedSubjects() {
   const [subjects, setSubjects] = useState([]);
   const [assignments, setAssignments] = useState([]);
 
+  // NEW: year filter
+  const [selectedYear, setSelectedYear] = useState(null);
+
   const [selectedClass, setSelectedClass] = useState(null);
   const [selectedSections, setSelectedSections] = useState([]); // for "Assign"
   const [selectedSubjects, setSelectedSubjects] = useState([]); // for "Assign"
@@ -47,6 +50,15 @@ export default function AssignedSubjects() {
     loadClasses().catch(console.error);
   }, []);
 
+  // Reset dependent picks when year changes
+  useEffect(() => {
+    setSelectedClass(null);
+    setSelectedSections([]);
+    setSelectedSubjects([]);
+    setSubjects([]);
+    setAssignments([]);
+  }, [selectedYear]);
+
   useEffect(() => {
     if (selectedClass?.value) {
       loadSubjectsForClass(selectedClass.value).catch(console.error);
@@ -57,14 +69,27 @@ export default function AssignedSubjects() {
   }, [selectedClass]);
 
   // ------------- Options -------------
-  const classOptions = useMemo(
-    () => classes.map((c) => ({ value: c.id, label: c.name })),
-    [classes]
+  const years = useMemo(() => {
+    const s = new Set();
+    (classes || []).forEach((c) => c.year && s.add(Number(c.year)));
+    return Array.from(s).sort((a, b) => b - a);
+  }, [classes]);
+
+  const yearOptions = useMemo(
+    () => years.map((y) => ({ value: y, label: String(y) })),
+    [years]
   );
+
+  const classOptions = useMemo(() => {
+    const list = selectedYear
+      ? (classes || []).filter((c) => Number(c.year) === Number(selectedYear))
+      : classes || [];
+    return list.map((c) => ({ value: c.id, label: c.name }));
+  }, [classes, selectedYear]);
 
   const currentClass = useMemo(() => {
     if (!selectedClass) return null;
-    return classes.find((c) => c.id === selectedClass.value) || null;
+    return (classes || []).find((c) => c.id === selectedClass.value) || null;
   }, [selectedClass, classes]);
 
   const sectionOptions = useMemo(() => {
@@ -80,9 +105,7 @@ export default function AssignedSubjects() {
     () =>
       (subjects || []).map((s) => ({
         value: s.id,
-        label:
-          s.name +
-          (s.is_practical ? " (Practical)" : s.is_theory ? " (Theory)" : ""),
+        label: s.name + (s.is_practical ? " (Practical)" : s.is_theory ? " (Theory)" : ""),
       })),
     [subjects]
   );
@@ -101,9 +124,7 @@ export default function AssignedSubjects() {
         subject_ids: selectedSubjects.map((s) => s.value),
       };
       const res = await AxiosInstance.post("class-subjects/bulk-assign/", payload);
-      toast.success(
-        `Assigned: ${res.data?.created ?? 0},`
-      );
+      toast.success(`Assigned: ${res.data?.created ?? 0}`);
       await loadAssignments(selectedClass.value);
       setSelectedSections([]);
       setSelectedSubjects([]);
@@ -119,7 +140,7 @@ export default function AssignedSubjects() {
   const grouped = useMemo(() => {
     const bySub = {};
     for (const a of assignments) {
-      const sid = a.subject; // subject id
+      const sid = a.subject;
       if (!bySub[sid]) {
         bySub[sid] = {
           subjectId: sid,
@@ -133,7 +154,6 @@ export default function AssignedSubjects() {
       bySub[sid].sectionNames.push(a.section_name);
       bySub[sid].rows.push(a);
     }
-    // enrich type flags from subjects list
     for (const key of Object.keys(bySub)) {
       const s = subjects.find((x) => x.id === Number(key));
       if (s) {
@@ -141,9 +161,7 @@ export default function AssignedSubjects() {
         bySub[key].isTheory = !!s.is_theory;
       }
     }
-    return Object.values(bySub).sort((a, b) =>
-      a.subjectName.localeCompare(b.subjectName)
-    );
+    return Object.values(bySub).sort((a, b) => a.subjectName.localeCompare(b.subjectName));
   }, [assignments, subjects]);
 
   // ------------- Edit modal -------------
@@ -151,16 +169,12 @@ export default function AssignedSubjects() {
     if (!currentClass) return;
 
     const g = grouped.find((x) => x.subjectId === subjectId);
-    const initial = (g?.sectionNames || []).map((name) => {
-      // map from name to option
-      const opt = sectionOptions.find((o) => o.label === name);
-      return opt || null;
-    }).filter(Boolean);
+    const initial = (g?.sectionNames || [])
+      .map((name) => sectionOptions.find((o) => o.label === name) || null)
+      .filter(Boolean);
 
     setEditSubjectId(subjectId);
-    setEditSubjectName(
-      subjects.find((s) => s.id === subjectId)?.name || "Subject"
-    );
+    setEditSubjectName(subjects.find((s) => s.id === subjectId)?.name || "Subject");
     setEditSections(initial);
     setIsEditOpen(true);
   };
@@ -187,10 +201,7 @@ export default function AssignedSubjects() {
   const removeAllForSubject = async (subjectId) => {
     if (!window.confirm("Remove this subject from all sections?")) return;
     try {
-      const toRemove = assignments
-        .filter((a) => a.subject === subjectId)
-        .map((a) => a.id);
-
+      const toRemove = assignments.filter((a) => a.subject === subjectId).map((a) => a.id);
       for (const id of toRemove) {
         await AxiosInstance.delete(`class-subjects/${id}/`);
       }
@@ -208,18 +219,28 @@ export default function AssignedSubjects() {
 
       {/* ------------ Assign panel ------------ */}
       <div className="bg-white rounded shadow p-4 mb-6">
-        <h2 className="text-xl font-semibold mb-4">
-          Assign Subjects to Class Sections
-        </h2>
+        <h2 className="text-xl font-semibold mb-4">Assign Subjects to Class Sections</h2>
 
-        <div className="grid md:grid-cols-3 gap-3">
+        <div className="grid md:grid-cols-4 gap-3">
+          {/* NEW: Year */}
+          <div>
+            <label className="block text-sm mb-1">Year</label>
+            <Select
+              isClearable
+              options={yearOptions}
+              value={yearOptions.find((o) => Number(o.value) === Number(selectedYear)) || null}
+              onChange={(opt) => setSelectedYear(opt ? Number(opt.value) : null)}
+              placeholder="All years"
+            />
+          </div>
+
           <div>
             <label className="block text-sm mb-1">Class</label>
             <Select
               options={classOptions}
               value={selectedClass}
               onChange={setSelectedClass}
-              placeholder="Select class"
+              placeholder={selectedYear ? "Select class (year)" : "Select class"}
             />
           </div>
 
@@ -262,7 +283,9 @@ export default function AssignedSubjects() {
       {/* ------------ Grouped table ------------ */}
       <div className="bg-white rounded shadow p-4">
         <h3 className="text-lg font-semibold mb-3">
-          Current Assignments {selectedClass ? `— ${selectedClass.label}` : ""}
+          Current Assignments
+          {selectedClass ? ` — ${selectedClass.label}` : ""}
+          {selectedYear ? ` (Year ${selectedYear})` : ""}
         </h3>
 
         {!selectedClass ? (
@@ -335,10 +358,7 @@ export default function AssignedSubjects() {
               />
 
               <div className="mt-5 flex justify-end gap-2">
-                <button
-                  onClick={() => setIsEditOpen(false)}
-                  className="px-4 py-2 rounded border"
-                >
+                <button onClick={() => setIsEditOpen(false)} className="px-4 py-2 rounded border">
                   Cancel
                 </button>
                 <button
