@@ -7,37 +7,99 @@ export default function MyStudents() {
   const [q, setQ] = useState("");
 
   // dropdown state
-  const [classes, setClasses] = useState([]);          // [{id, name, sections:[{id,name}]}]
+  const [classes, setClasses] = useState([]);          // [{id, name}]
   const [selectedClassId, setSelectedClassId] = useState("");
-  const [sections, setSections] = useState([]);        // current class' sections
+  const [sections, setSections] = useState([]);        // [{id, name}]
   const [selectedSectionId, setSelectedSectionId] = useState("");
+  const [subjects, setSubjects] = useState([]);        // [{id, name}]
+  const [selectedSubjectId, setSelectedSubjectId] = useState("");
 
-  // 1) Load classes (with embedded sections)
+  // timetable slots (scoped to logged-in teacher by backend)
+  const [slots, setSlots] = useState([]);
+
+  // 1) Load MY timetable
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const { data } = await AxiosInstance.get("class-names/");
-        if (!cancelled) setClasses(Array.isArray(data) ? data : []);
+        const res = await AxiosInstance.get("timetable/");
+        const list = Array.isArray(res.data) ? res.data : res.data?.results || [];
+        if (!cancelled) setSlots(list);
       } catch (e) {
-        console.error("Failed to load classes", e);
+        console.error("Timetable load failed", e);
       }
     })();
     return () => { cancelled = true; };
   }, []);
 
-  // 2) When class changes, update sections and reset section
+  // 2) Build CLASSES list from my timetable
   useEffect(() => {
-    const cls = classes.find(c => String(c.id) === String(selectedClassId));
-    setSections(cls?.sections || []);
-    setSelectedSectionId("");
-  }, [selectedClassId, classes]);
+    const unique = new Map();
+    for (const s of slots) {
+      const classId = String(s.class_id ?? s.class_name ?? s.class);
+      if (!classId) continue;
+      if (!unique.has(classId)) {
+        unique.set(classId, {
+          id: classId,
+          name: s.class_label || s.class_name || `Class ${classId}`,
+        });
+      }
+    }
+    setClasses(Array.from(unique.values()));
+  }, [slots]);
 
-  // 3) Fetch students when both class & section are chosen
+  // 3) When class changes, derive SECTIONS from timetable
+  useEffect(() => {
+    if (!selectedClassId) {
+      setSections([]);
+      setSelectedSectionId("");
+      setSubjects([]);
+      setSelectedSubjectId("");
+      return;
+    }
+    const unique = new Map();
+    for (const s of slots) {
+      const classId   = String(s.class_id ?? s.class_name ?? s.class);
+      const sectionId = String(s.section_id ?? s.section);
+      if (classId === String(selectedClassId) && sectionId) {
+        if (!unique.has(sectionId)) {
+          unique.set(sectionId, { id: sectionId, name: s.section_label || s.section || "" });
+        }
+      }
+    }
+    setSections(Array.from(unique.values()));
+    setSelectedSectionId("");
+    setSubjects([]);
+    setSelectedSubjectId("");
+  }, [selectedClassId, slots]);
+
+  // 4) When class+section change, derive SUBJECTS from timetable
+  useEffect(() => {
+    if (!selectedClassId || !selectedSectionId) {
+      setSubjects([]);
+      setSelectedSubjectId("");
+      return;
+    }
+    const unique = new Map();
+    for (const s of slots) {
+      const classId   = String(s.class_id ?? s.class_name ?? s.class);
+      const sectionId = String(s.section_id ?? s.section);
+      const subjectId = String(s.subject_id ?? s.subject);
+      if (classId === String(selectedClassId) && sectionId === String(selectedSectionId) && subjectId) {
+        if (!unique.has(subjectId)) {
+          unique.set(subjectId, { id: subjectId, name: s.subject_label || s.subject_name || "" });
+        }
+      }
+    }
+    setSubjects(Array.from(unique.values()));
+    setSelectedSubjectId("");
+  }, [selectedClassId, selectedSectionId, slots]);
+
+  // 5) Fetch students when class, section & subject are chosen
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (!selectedClassId || !selectedSectionId) {
+      if (!selectedClassId || !selectedSectionId || !selectedSubjectId) {
         setRows([]);
         return;
       }
@@ -47,6 +109,7 @@ export default function MyStudents() {
           params: {
             class_id: selectedClassId,
             section_id: selectedSectionId,
+            subject_id: selectedSubjectId,
           },
         });
         if (!cancelled) setRows(Array.isArray(data) ? data : []);
@@ -58,7 +121,7 @@ export default function MyStudents() {
       }
     })();
     return () => { cancelled = true; };
-  }, [selectedClassId, selectedSectionId]);
+  }, [selectedClassId, selectedSectionId, selectedSubjectId]);
 
   // search filter
   const filtered = useMemo(() => {
@@ -103,6 +166,19 @@ export default function MyStudents() {
             ))}
           </select>
 
+          {/* Subject select */}
+          <select
+            value={selectedSubjectId}
+            onChange={(e) => setSelectedSubjectId(e.target.value)}
+            disabled={!selectedClassId || !selectedSectionId || subjects.length === 0}
+            className="px-3 py-2 border rounded-lg text-sm bg-white disabled:bg-slate-100"
+          >
+            <option value="">Select subject…</option>
+            {subjects.map((s) => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
+          </select>
+
           {/* Search box */}
           <input
             value={q}
@@ -142,9 +218,9 @@ export default function MyStudents() {
           ))
         ) : (
           <div className="p-4 text-sm text-slate-500">
-            {selectedClassId && selectedSectionId
+            {selectedClassId && selectedSectionId && selectedSubjectId
               ? "No students found."
-              : "Pick class and section to load students."}
+              : "Pick class, section & subject to load students."}
           </div>
         )}
       </div>

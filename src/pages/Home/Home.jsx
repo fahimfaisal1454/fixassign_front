@@ -10,7 +10,7 @@ const Home = () => {
       <HeroSection />
       <CollegeOverview />
 
-      {/* ✅ Teacher Dashboard Button */}
+      {/* ✅ Teacher Dashboard Button
       <div className="mt-6 flex justify-center">
         <Link
           to="/teacher/dashboard"
@@ -18,7 +18,7 @@ const Home = () => {
         >
           Go to Teacher Dashboard
         </Link>
-      </div>
+      </div> */}
     </div>
   );
 };

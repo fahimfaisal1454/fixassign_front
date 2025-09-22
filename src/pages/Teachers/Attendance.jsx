@@ -16,12 +16,18 @@ const idOf = (obj, ...keys) => {
 const slotClassId   = (s) => idOf(s, "class_name", "class_id", "class");
 const slotSectionId = (s) => idOf(s, "section", "section_id");
 const slotSubjectId = (s) => idOf(s, "subject", "subject_id");
-const slotDayName   = (s) => s?.day_of_week_display || (Number.isInteger(s?.day_of_week) ? WEEKDAYS[s.day_of_week] : "");
+const slotDayName   = (s) =>
+  s?.day_of_week_display ||
+  (Number.isInteger(s?.day_of_week) ? WEEKDAYS[s.day_of_week] : "");
 
+/**
+ * Attendance (teacher-scoped)
+ * - Class/Section dropdowns are now filtered to only the teacher's timetable.
+ */
 export default function Attendance() {
   // inputs
   const [date, setDate] = useState(() => new Date().toISOString().slice(0,10));
-  const [classes, setClasses] = useState([]);    // [{id,name,sections:[{id,name}]}]
+  const [allClasses, setAllClasses] = useState([]); // raw /class-names/ (with sections)
   const [sections, setSections] = useState([]);
   const [subjects, setSubjects] = useState([]);
 
@@ -42,7 +48,7 @@ export default function Attendance() {
     (async () => {
       try {
         const { data } = await Axios.get("class-names/");
-        setClasses(Array.isArray(data) ? data : []);
+        setAllClasses(Array.isArray(data) ? data : []);
       } catch (e) {
         console.error("Failed to load classes", e);
       }
@@ -62,6 +68,46 @@ export default function Attendance() {
     })();
   }, []);
 
+  // ---- NEW: derive allowed classes/sections from timetable ----
+  // Map<classId, Set<sectionId>> for the teacher
+  const allowedByClass = useMemo(() => {
+    const m = new Map();
+    for (const s of slots) {
+      const cId = slotClassId(s);
+      const secId = slotSectionId(s);
+      if (!cId) continue;
+      if (!m.has(cId)) m.set(cId, new Set());
+      if (secId) m.get(cId).add(secId);
+    }
+    return m;
+  }, [slots]);
+
+  // Filtered classes list (only classes the teacher actually teaches).
+  // Also filter the sections inside each class to only the teacher's sections.
+  const classes = useMemo(() => {
+    if (!allClasses.length) return [];
+    if (allowedByClass.size === 0) return [];
+    return allClasses
+      .filter(c => allowedByClass.has(String(c.id)))
+      .map(c => ({
+        ...c,
+        sections: (c.sections || []).filter(sec =>
+          allowedByClass.get(String(c.id)).has(String(sec.id))
+        ),
+      }));
+  }, [allClasses, allowedByClass]);
+
+  // If current selection becomes invalid after filtering, reset it.
+  useEffect(() => {
+    if (selectedClassId && !classes.some(c => String(c.id) === String(selectedClassId))) {
+      setSelectedClassId("");
+      setSelectedSectionId("");
+      setSelectedSubjectId("");
+      setPeriodId("");
+      setRows([]);
+    }
+  }, [classes, selectedClassId]);
+
   // 3) when class changes, set sections + reset lower selections
   useEffect(() => {
     const cls = classes.find(c => String(c.id) === String(selectedClassId));
@@ -73,7 +119,7 @@ export default function Attendance() {
     setRows([]);
   }, [selectedClassId, classes]);
 
-  // 4) when class+section change, derive subjects from timetable
+  // 4) when class+section change, derive subjects from timetable (teacher-scoped)
   useEffect(() => {
     if (!selectedClassId || !selectedSectionId) {
       setSubjects([]); setSelectedSubjectId(""); setPeriodId(""); return;
@@ -145,7 +191,7 @@ export default function Attendance() {
         const rec = bySid.get(String(s.id));
         return {
           student: s.id,
-          student_name: s.full_name || s.name || "",   // <-- FULL NAME
+          student_name: s.full_name || s.name || "",
           status: rec?.status || "PRESENT",
           remarks: rec?.remarks || "",
           attendance_id: rec?.id ?? null,

@@ -9,17 +9,43 @@ export default function AttendanceReport() {
   // Sheet modal
   const [sheetOpen, setSheetOpen] = useState(false);
 
-  // Filters
-  const [classes, setClasses] = useState([]);
+  // Raw data
+  const [allClasses, setAllClasses] = useState([]); // from /class-names/ (each has sections)
+  const [slots, setSlots] = useState([]);           // teacher's timetable
+
+  // Filtered options (computed)
   const [sections, setSections] = useState([]);
   const [subjects, setSubjects] = useState([]);
 
+  // Selections
   const [selectedClassId, setSelectedClassId] = useState("");
   const [selectedSectionId, setSelectedSectionId] = useState("");
   const [selectedSubjectId, setSelectedSubjectId] = useState("");
   const [date, setDate] = useState("");
 
   // Labels
+  const classes = useMemo(() => {
+    // Build Map<classId, Set<sectionId>> from timetable (teacher-scoped)
+    const allowed = new Map();
+    for (const s of slots) {
+      const cls = String(s.class_name ?? s.class_id ?? s.class ?? "");
+      const sec = String(s.section ?? s.section_id ?? "");
+      if (!cls) continue;
+      if (!allowed.has(cls)) allowed.set(cls, new Set());
+      if (sec) allowed.get(cls).add(sec);
+    }
+    if (!allClasses.length || allowed.size === 0) return [];
+    // Filter classes and their sections to only allowed items
+    return allClasses
+      .filter(c => allowed.has(String(c.id)))
+      .map(c => ({
+        ...c,
+        sections: (c.sections || []).filter(sec =>
+          allowed.get(String(c.id)).has(String(sec.id))
+        ),
+      }));
+  }, [allClasses, slots]);
+
   const selectedClass = useMemo(
     () => classes.find(c => String(c.id) === String(selectedClassId)),
     [classes, selectedClassId]
@@ -33,17 +59,42 @@ export default function AttendanceReport() {
     [subjects, selectedSubjectId]
   );
 
-  // Load classes (with sections)
+  // Load raw classes (with sections)
   useEffect(() => {
     (async () => {
       try {
         const { data } = await Axios.get("class-names/");
-        setClasses(Array.isArray(data) ? data : []);
+        setAllClasses(Array.isArray(data) ? data : []);
       } catch (e) {
         console.error("Failed to load classes", e);
       }
     })();
   }, []);
+
+  // Load MY timetable (scoped to logged-in teacher)
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await Axios.get("timetable/");
+        const list = Array.isArray(res.data) ? res.data : res.data?.results || [];
+        setSlots(list);
+      } catch (e) {
+        console.error("Failed to load timetable", e);
+      }
+    })();
+  }, []);
+
+  // If the current class becomes invalid after filtering, reset selections
+  useEffect(() => {
+    if (selectedClassId && !classes.some(c => String(c.id) === String(selectedClassId))) {
+      setSelectedClassId("");
+      setSelectedSectionId("");
+      setSelectedSubjectId("");
+      setSections([]);
+      setSubjects([]);
+      setRows([]);
+    }
+  }, [classes, selectedClassId]);
 
   // When class changes, set sections and reset lower selections
   useEffect(() => {
@@ -71,7 +122,7 @@ export default function AttendanceReport() {
         for (const r of items) {
           const id = r.subject || r.subject_id;
           const name = r.subject_label || r.subject_name || "";
-          if (id && !uniq.has(id)) uniq.set(id, { id, name });
+          if (id && !uniq.has(id)) uniq.set(id, { id: String(id), name });
         }
         setSubjects(Array.from(uniq.values()));
       } catch (e) {
