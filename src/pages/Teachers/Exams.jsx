@@ -18,7 +18,8 @@ export default function EnterMarks() {
 
   // students & marks
   const [students, setStudents] = useState([]);
-  const [marks, setMarks] = useState({});         // { [studentId]: "87" }
+  const [marks, setMarks] = useState({});         // form inputs being typed: { [studentId]: "87" }
+  const [existingMarks, setExistingMarks] = useState({}); // server marks: { [studentId]: "87" } -> LOCKED
   const [loading, setLoading] = useState(false);
 
   // internal: normalized teacher assignments from timetable
@@ -27,6 +28,9 @@ export default function EnterMarks() {
   // keep track of the last successfully saved rows so the teacher can review
   const [lastSavedRows, setLastSavedRows] = useState([]); // [{sid, name, roll, score, subjectName, examName}]
   const [showSavedModal, setShowSavedModal] = useState(false);
+
+  // manual/auto re-fetch trigger
+  const [refreshKey, setRefreshKey] = useState(0);
 
   // ───────────────────────────────────────────────────────────
   // 1) Load TEACHER's classes/sections/subjects from timetable/?user=me
@@ -88,7 +92,7 @@ export default function EnterMarks() {
     // Reset selections if no longer valid
     if (classId && !byClass.has(String(classId))) {
       setClassId(""); setSectionId(""); setSubjectId(""); setExamId("");
-      setStudents([]); setMarks({}); setLastSavedRows([]);
+      setStudents([]); setMarks({}); setExistingMarks({}); setLastSavedRows([]);
     }
   }, [teachRows]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -106,7 +110,7 @@ export default function EnterMarks() {
     setSections(list);
 
     setSectionId(""); setSubjectId(""); setExamId("");
-    setStudents([]); setMarks({}); setLastSavedRows([]);
+    setStudents([]); setMarks({}); setExistingMarks({}); setLastSavedRows([]);
   }, [classId, teachRows]);
 
   // ───────────────────────────────────────────────────────────
@@ -124,7 +128,7 @@ export default function EnterMarks() {
     setSubjects(list);
 
     setSubjectId(""); setExamId("");
-    setMarks({}); setLastSavedRows([]);
+    setMarks({}); setExistingMarks({}); setLastSavedRows([]);
   }, [classId, sectionId, teachRows]);
 
   // ───────────────────────────────────────────────────────────
@@ -154,7 +158,7 @@ export default function EnterMarks() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (!classId || !sectionId) { setStudents([]); setMarks({}); return; }
+      if (!classId || !sectionId) { setStudents([]); setMarks({}); setExistingMarks({}); return; }
       setLoading(true);
       try {
         const { data } = await AxiosInstance.get("students/", {
@@ -173,7 +177,7 @@ export default function EnterMarks() {
       } catch (err) {
         console.error(err);
         if (!cancelled) {
-          setStudents([]); setMarks({});
+          setStudents([]); setMarks({}); setExistingMarks({});
           toast.error("Failed to load students.");
         }
       } finally {
@@ -184,37 +188,32 @@ export default function EnterMarks() {
   }, [classId, sectionId]);
 
   // ───────────────────────────────────────────────────────────
-  // 7) Load EXISTING marks for the chosen exam + subject
-  //     (prefill inputs so you can see who already has what)
+  // 7) Load EXISTING marks for the chosen exam + subject (LOCK them)
+  //     Refreshable via refreshKey and after saves
   // ───────────────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (!examId || !subjectId) { return; }
+      // reset when filters incomplete
+      if (!examId || !subjectId) { setExistingMarks({}); return; }
       try {
         const res = await AxiosInstance.get("exam-marks/", {
           params: { exam: examId, subject: subjectId },
         });
         const arr = Array.isArray(res.data) ? res.data : [];
-        // map: studentId -> score string
         const serverMap = {};
         for (const m of arr) serverMap[m.student] = m.score == null ? "" : String(m.score);
-
-        // merge with any numbers you’re currently typing (your inputs win)
-        setMarks(prev => {
-          const merged = { ...serverMap };
-          for (const [sid, v] of Object.entries(prev)) {
-            if (v !== "" && v != null) merged[sid] = v;
-          }
-          return merged;
-        });
+        if (!cancelled) {
+          setExistingMarks(serverMap);
+          // do NOT override current typing; we only lock inputs in UI
+        }
       } catch (err) {
-        console.warn("prefill marks failed", err);
-        // ignore; just show blank inputs
+        console.warn("prefill/lock fetch failed", err);
+        if (!cancelled) setExistingMarks({});
       }
     })();
     return () => { cancelled = true; };
-  }, [examId, subjectId, classId, sectionId]);
+  }, [examId, subjectId, classId, sectionId, refreshKey]);
 
   // ───────────────────────────────────────────────────────────
   // helpers
@@ -248,16 +247,18 @@ export default function EnterMarks() {
   };
 
   // UPSERT: POST new mark; if 400 (exists), GET id and PATCH
+  // Now we SKIP students who already have marks (locked).
   const saveAll = async () => {
     if (!classId || !sectionId || !subjectId) { toast.error("Pick class, section and subject."); return; }
     if (!examId) { toast.error("Pick an exam."); return; }
 
     const payloads = students
       .map(s => ({ sid: s.id, score: marks[s.id] }))
-      .filter(x => x.score !== "" && x.score != null);
+      .filter(x => x.score !== "" && x.score != null)
+      .filter(x => existingMarks[x.sid] == null); // ← don't overwrite locked marks
 
     if (!payloads.length) {
-      toast("Nothing to save.");
+      toast("Nothing to save (either empty or already locked).");
       return;
     }
 
@@ -271,6 +272,7 @@ export default function EnterMarks() {
         ok++;
       } catch (err) {
         try {
+          // in case backend returns 400 (exists) we still patch, but this should be rare because we skip locked
           const g = await AxiosInstance.get("exam-marks/", { params: common });
           const id = Array.isArray(g.data) ? g.data[0]?.id : g.data?.results?.[0]?.id;
           if (id) {
@@ -307,7 +309,12 @@ export default function EnterMarks() {
 
     if (fail) toast(`Saved ${ok}, failed ${fail}. Click "View saved marks" to review.`, { duration: 5000 });
     else toast.success(`Saved ${ok} marks. Click "View saved marks" to review.`, { duration: 4000 });
+
+    // 🔄 Immediately re-fetch existing marks so newly saved rows become locked
+    setRefreshKey(k => k + 1);
   };
+
+  const doRefresh = () => setRefreshKey(k => k + 1);
 
   return (
     <div className="space-y-6">
@@ -375,10 +382,20 @@ export default function EnterMarks() {
           </div>
         </div>
 
-        <div className="text-xs text-slate-600">
-          {currentClassName && currentSectionName && (
-            <>Selected: <b>{currentClassName}</b> / <b>{currentSectionName}</b>{currentSubjectName ? <> / <b>{currentSubjectName}</b></> : null}</>
-          )}
+        <div className="flex items-center justify-between">
+          <div className="text-xs text-slate-600">
+            {currentClassName && currentSectionName && (
+              <>Selected: <b>{currentClassName}</b> / <b>{currentSectionName}</b>{currentSubjectName ? <> / <b>{currentSubjectName}</b></> : null}</>
+            )}
+          </div>
+          <button
+            onClick={doRefresh}
+            className="px-3 py-1.5 text-xs rounded border bg-white hover:bg-slate-50"
+            disabled={!examId || !subjectId}
+            title="Re-fetch existing marks for this exam & subject"
+          >
+            Refresh marks
+          </button>
         </div>
       </div>
 
@@ -410,36 +427,61 @@ export default function EnterMarks() {
 
         {classId && sectionId && !loading && students.length > 0 && (
           <>
-            <div className="grid grid-cols-6 gap-3 px-4 py-2 text-xs font-medium text-slate-600 border-b bg-slate-50">
+            <div className="grid grid-cols-7 gap-3 px-4 py-2 text-xs font-medium text-slate-600 border-b bg-slate-50">
               <div>#</div>
               <div>Name</div>
               <div>Roll</div>
               <div>Subject</div>
               <div>Exam</div>
               <div>Score (0–100)</div>
+              <div className="text-center">Status</div>
             </div>
 
-            {students.map((s, i) => (
-              <div key={s.id} className="grid grid-cols-6 gap-3 px-4 py-2 text-sm border-b last:border-b-0">
-                <div>{i + 1}</div>
-                <div>{s.full_name}</div>
-                <div>{s.roll_number ?? "—"}</div>
-                <div>{currentSubjectName || "—"}</div>
-                <div>{exams.find(e => String(e.id) === String(examId))?.name || "—"}</div>
-                <div>
-                  <input
-                    type="number"
-                    min={0}
-                    max={100}
-                    value={marks[s.id] ?? ""}  // ← prefilled from existing marks (if any)
-                    onChange={(e) => setScore(s.id, e.target.value)}
-                    className="w-28 border rounded px-2 py-1"
-                    disabled={!subjectId || !examId}
-                    placeholder="e.g. 78"
-                  />
+            {students.map((s, i) => {
+              const lockedScore = existingMarks[s.id];  // if defined -> lock
+              const isLocked = lockedScore !== undefined && lockedScore !== null && lockedScore !== "";
+              const value = isLocked
+                ? String(lockedScore)              // show server score
+                : (marks[s.id] ?? "");             // show typing value
+
+              return (
+                <div key={s.id} className="grid grid-cols-7 gap-3 px-4 py-2 text-sm border-b last:border-b-0">
+                  <div>{i + 1}</div>
+                  <div>{s.full_name}</div>
+                  <div>{s.roll_number ?? "—"}</div>
+                  <div>{currentSubjectName || "—"}</div>
+                  <div>{(exams.find(e => String(e.id) === String(examId))?.name) || "—"}</div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={value}
+                      onChange={(e) => setScore(s.id, e.target.value)}
+                      className={`w-28 border rounded px-2 py-1 ${isLocked ? "bg-slate-100 text-slate-600 cursor-not-allowed" : ""}`}
+                      disabled={!subjectId || !examId || isLocked}
+                      placeholder="e.g. 78"
+                    />
+                    {isLocked && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 border border-slate-300">
+                        🔒 locked
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-center">
+                    {isLocked ? (
+                      <span className="text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded text-xs">
+                        Saved
+                      </span>
+                    ) : (
+                      <span className="text-slate-600 bg-slate-50 border border-slate-200 px-2 py-0.5 rounded text-xs">
+                        Editable
+                      </span>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
 
             <div className="p-3 flex justify-end">
               <button
@@ -466,7 +508,11 @@ export default function EnterMarks() {
           {/* dialog */}
           <div className="relative bg-white rounded-xl shadow-xl w-full max-w-2xl mx-4">
             <div className="px-4 py-3 border-b flex items-center justify-between">
-              <div className="font-semibold">Recently saved marks{currentExamName ? ` — ${currentExamName}` : ""}{currentSubjectName ? ` (${currentSubjectName})` : ""}</div>
+              <div className="font-semibold">
+                Recently saved marks
+                {currentExamName ? ` — ${currentExamName}` : ""}
+                {currentSubjectName ? ` (${currentSubjectName})` : ""}
+              </div>
               <button
                 onClick={() => setShowSavedModal(false)}
                 className="px-2 py-1 text-sm border rounded hover:bg-slate-50"
