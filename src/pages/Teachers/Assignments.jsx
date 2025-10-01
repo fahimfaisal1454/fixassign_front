@@ -7,9 +7,9 @@ export default function TeacherAssignments() {
   const [timetable, setTimetable] = useState([]);
   const [list, setList] = useState([]);
   const [saving, setSaving] = useState(false);
-  const [file, setFile] = useState(null);
 
-  // We store selections by a stable "key" (prefer id, else label)
+  // Create form
+  const [file, setFile] = useState(null);
   const [selected, setSelected] = useState({
     classKey: "",
     sectionKey: "",
@@ -18,6 +18,10 @@ export default function TeacherAssignments() {
     instructions: "",
     due_date: "",
   });
+
+  // Edit form
+  const [editing, setEditing] = useState(null);     // { id, title, instructions, due_date, fileUrl, _orig: {...} } | null
+  const [editFile, setEditFile] = useState(null);   // File | null
 
   // ---------------- Load data ----------------
   useEffect(() => {
@@ -47,7 +51,7 @@ export default function TeacherAssignments() {
   };
   useEffect(() => { loadMine(); }, []);
 
-  // ---------------- Normalization helpers ----------------
+  // ---------------- Helpers ----------------
   const toStr = (v) => (v === 0 ? "0" : v == null ? "" : String(v));
   const isNum = (v) => /^\d+$/.test(toStr(v));
 
@@ -57,7 +61,7 @@ export default function TeacherAssignments() {
       if (v && typeof v === "object" && isNum(v.id)) return toStr(v.id);
       if (isNum(v)) return toStr(v);
     }
-    return ""; // no numeric id
+    return "";
   };
 
   const getLabel = (o, keys, fallbackId = "") => {
@@ -74,8 +78,6 @@ export default function TeacherAssignments() {
     return fallbackId ? toStr(fallbackId) : "";
   };
 
-  // Build a flat set of rows with both ID and label for each dimension,
-  // plus a "key" we can use in selects (prefer id, else label).
   const rows = useMemo(() => {
     const raw = Array.isArray(timetable) ? timetable : (timetable?.results || []);
     return (raw || []).map((t) => {
@@ -88,21 +90,15 @@ export default function TeacherAssignments() {
       const subjectId    = getId(t, ["subject_id", "subject"]);
       const subjectLabel = getLabel(t, ["subject_label", "subject_name", "subject"], subjectId);
 
-      const classKey   = classId || classLabel;
-      const sectionKey = sectionId || sectionLabel;
-      const subjectKey = subjectId || subjectLabel;
-
       return {
-        classId, classLabel, classKey,
-        sectionId, sectionLabel, sectionKey,
-        subjectId, subjectLabel, subjectKey,
+        classId, classLabel, classKey: classId || classLabel,
+        sectionId, sectionLabel, sectionKey: sectionId || sectionLabel,
+        subjectId, subjectLabel, subjectKey: subjectId || subjectLabel,
       };
     })
-    // keep only rows that at least have a class label/key
     .filter(r => r.classKey && r.sectionKey && r.subjectKey);
   }, [timetable]);
 
-  // ---------------- Cascading options (unique by key) ----------------
   const classOptions = useMemo(() => {
     const m = new Map();
     rows.forEach(r => { if (!m.has(r.classKey)) m.set(r.classKey, { key: r.classKey, id: r.classId, label: r.classLabel }); });
@@ -125,26 +121,14 @@ export default function TeacherAssignments() {
     return [...m.values()];
   }, [rows, selected.classKey, selected.sectionKey]);
 
-  // ---------------- Resolve chosen trio to IDs/labels for POST ----------------
-  const resolveSelection = () => {
-    // Find any row matching the current selection
-    const hit = rows.find(r =>
+  const resolveSelection = () =>
+    rows.find(r =>
       r.classKey === selected.classKey &&
       r.sectionKey === selected.sectionKey &&
       r.subjectKey === selected.subjectKey
-    );
-    if (!hit) return null;
-    return {
-      class_id: hit.classId,   // may be "", use label fallback below
-      class_label: hit.classLabel,
-      section_id: hit.sectionId,
-      section_label: hit.sectionLabel,
-      subject_id: hit.subjectId,
-      subject_label: hit.subjectLabel,
-    };
-  };
+    ) || null;
 
-  // ---------------- Submit ----------------
+  // ---------------- Create ----------------
   const submit = async (e) => {
     e.preventDefault();
 
@@ -152,13 +136,13 @@ export default function TeacherAssignments() {
       toast.error("Pick Class, Section and Subject.");
       return;
     }
-    if (!selected.title || !file) {
-      toast.error("Set a title and choose a PDF.");
+    if (!selected.title) {
+      toast.error("Set a title.");
       return;
     }
 
     const resolved = resolveSelection();
-    if (!resolved) {
+    if (!resolved || !resolved.classId || !resolved.sectionId || !resolved.subjectId) {
       toast.error("Invalid selection. Pick options again.");
       return;
     }
@@ -166,54 +150,118 @@ export default function TeacherAssignments() {
     setSaving(true);
     try {
       const fd = new FormData();
-
-      // Prefer numeric IDs if available; otherwise send labels (backend can accept labels if you enabled that).
-      fd.append("class_name", resolved.class_id || resolved.class_label);
-      fd.append("section",    resolved.section_id || resolved.section_label);
-      fd.append("subject",    resolved.subject_id || resolved.subject_label);
-
+      fd.append("class_name", resolved.classId);   // numeric IDs only
+      fd.append("section",    resolved.sectionId);
+      fd.append("subject",    resolved.subjectId);
       fd.append("title", selected.title);
-      if (selected.instructions) fd.append("instructions", selected.instructions);
+      // instructions is optional but we send it when present (can be empty string too)
+      fd.append("instructions", selected.instructions || "");
       if (selected.due_date) fd.append("due_date", selected.due_date);
-      fd.append("file", file);
+      // file is optional (PDF or image)
+      if (file) fd.append("file", file);
 
-      await AxiosInstance.post("assignments/", fd); // multipart handled automatically
-      toast.success("Assignment uploaded");
+      await AxiosInstance.post("assignments/", fd);
+      toast.success("Assignment created");
 
       setSelected({ classKey: "", sectionKey: "", subjectKey: "", title: "", instructions: "", due_date: "" });
       setFile(null);
       await loadMine();
     } catch (e) {
-      console.error("Upload failed:", e?.response?.data || e);
-      // helpful error bubble from server if available
-      const msg = e?.response?.data?.detail || "Upload failed";
+      console.error("Create failed:", e?.response?.data || e);
+      const msg = e?.response?.data?.detail || "Create failed";
       toast.error(msg);
     } finally {
       setSaving(false);
     }
   };
 
+  // ---------------- Delete ----------------
+  const handleDelete = async (id) => {
+    if (!window.confirm("Delete this assignment?")) return;
+    try {
+      await AxiosInstance.delete(`assignments/${id}/`);
+      toast.success("Deleted");
+      await loadMine();
+    } catch (e) {
+      console.error("Delete failed:", e?.response?.data || e);
+      const msg = e?.response?.data?.detail || "Delete failed";
+      toast.error(msg);
+    }
+  };
+
+  // ---------------- Edit ----------------
+  const openEdit = (a) => {
+    // Make sure we keep the original so we can avoid sending unchanged fields if you want.
+    const orig = {
+      title: a.title || "",
+      instructions: a.instructions ?? "",   // ensure we capture it even if empty
+      due_date: a.due_date || "",
+      fileUrl: a.file || "",
+    };
+    setEditing({ id: a.id, ...orig, _orig: orig });
+    setEditFile(null);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const saveEdit = async (e) => {
+    e.preventDefault();
+    if (!editing) return;
+
+    setSaving(true);
+    try {
+      // PATCH multipart
+      const fd = new FormData();
+
+      // Always send these three fields (they're safe to update)
+      fd.append("title", editing.title || "");
+      // instructions can be empty string – we still send it to persist clearing
+      fd.append("instructions", editing.instructions ?? "");
+      if (editing.due_date) fd.append("due_date", editing.due_date);
+      else fd.append("due_date", ""); // clear due date if user erased it
+
+      // Replace file only if a new one was chosen
+      if (editFile) fd.append("file", editFile);
+
+      await AxiosInstance.patch(`assignments/${editing.id}/`, fd);
+      toast.success("Updated");
+      setEditing(null);
+      setEditFile(null);
+      await loadMine();
+    } catch (e2) {
+      console.error("Update failed:", e2?.response?.data || e2);
+      const msg = e2?.response?.data?.detail || "Update failed";
+      toast.error(msg);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const cancelEdit = () => {
+    setEditing(null);
+    setEditFile(null);
+  };
+
   // ---------------- Pretty labels for list ----------------
   const labelMaps = useMemo(() => {
-    const classes = new Map(classOptions.map(o => [o.key, o.label]));
-    const sections = new Map(sectionOptions.map(o => [o.key, o.label]));
-    const subjects = new Map(subjectOptions.map(o => [o.key, o.label]));
+    // Build from all rows to ensure labels exist even when selects change
+    const classes = new Map();
+    const sections = new Map();
+    const subjects = new Map();
     rows.forEach(r => {
-      if (!classes.has(r.classKey)) classes.set(r.classKey, r.classLabel);
-      if (!sections.has(r.sectionKey)) sections.set(r.sectionKey, r.sectionLabel);
-      if (!subjects.has(r.subjectKey)) subjects.set(r.subjectKey, r.subjectLabel);
+      if (!classes.has(r.classId)) classes.set(r.classId, r.classLabel);
+      if (!sections.has(r.sectionId)) sections.set(r.sectionId, r.sectionLabel);
+      if (!subjects.has(r.subjectId)) subjects.set(r.subjectId, r.subjectLabel);
     });
     return { classes, sections, subjects };
-  }, [classOptions, sectionOptions, subjectOptions, rows]);
+  }, [rows]);
 
   const human = (a) => {
-    // Try to map IDs back to labels; fall back to raw values
-    const classKey = toStr(a.class_name ?? a.class_name_id ?? a.class ?? "");
+    const classKey = toStr(a.class_name ?? a.class_name_id ?? "");
     const sectionKey = toStr(a.section ?? a.section_id ?? "");
     const subjectKey = toStr(a.subject ?? a.subject_id ?? "");
-    const cls = labelMaps.classes.get(classKey) ?? (a.class_label ?? a.class_name ?? a.class ?? classKey);
-    const sec = labelMaps.sections.get(sectionKey) ?? (a.section_label ?? a.section ?? sectionKey);
-    const sub = labelMaps.subjects.get(subjectKey) ?? (a.subject_label ?? a.subject ?? subjectKey);
+    const cls = labelMaps.classes.get(classKey) ?? classKey;
+    const sec = labelMaps.sections.get(sectionKey) ?? sectionKey;
+    const sub = labelMaps.subjects.get(subjectKey) ?? subjectKey;
     return { cls, sec, sub };
   };
 
@@ -222,83 +270,131 @@ export default function TeacherAssignments() {
     <div className="p-4 space-y-6">
       <h2 className="text-xl font-semibold">Assignments</h2>
 
-      {/* Upload form */}
-      <form onSubmit={submit} className="bg-white rounded-xl border p-4 grid gap-3">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          {/* Class */}
-          <select
-            className="select select-bordered"
-            value={selected.classKey}
-            onChange={(e) => setSelected(s => ({ ...s, classKey: e.target.value, sectionKey: "", subjectKey: "" }))}
-          >
-            <option value="">Class</option>
-            {classOptions.map(o => (
-              <option key={o.key} value={o.key}>{o.label}</option>
-            ))}
-          </select>
+      {/* Create / Edit form */}
+      <form onSubmit={editing ? saveEdit : submit} className="bg-white rounded-xl border p-4 grid gap-3">
+        {!editing && (
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <select
+                className="select select-bordered"
+                value={selected.classKey}
+                onChange={(e) => setSelected(s => ({ ...s, classKey: e.target.value, sectionKey: "", subjectKey: "" }))}
+              >
+                <option value="">Class</option>
+                {classOptions.map(o => (
+                  <option key={o.key} value={o.key}>{o.label}</option>
+                ))}
+              </select>
 
-          {/* Section */}
-          <select
-            className="select select-bordered"
-            value={selected.sectionKey}
-            disabled={!selected.classKey}
-            onChange={(e) => setSelected(s => ({ ...s, sectionKey: e.target.value, subjectKey: "" }))}
-          >
-            <option value="">Section</option>
-            {sectionOptions.map(o => (
-              <option key={o.key} value={o.key}>{o.label}</option>
-            ))}
-          </select>
+              <select
+                className="select select-bordered"
+                value={selected.sectionKey}
+                disabled={!selected.classKey}
+                onChange={(e) => setSelected(s => ({ ...s, sectionKey: e.target.value, subjectKey: "" }))}
+              >
+                <option value="">Section</option>
+                {sectionOptions.map(o => (
+                  <option key={o.key} value={o.key}>{o.label}</option>
+                ))}
+              </select>
 
-          {/* Subject */}
-          <select
-            className="select select-bordered"
-            value={selected.subjectKey}
-            disabled={!selected.classKey || !selected.sectionKey}
-            onChange={(e) => setSelected(s => ({ ...s, subjectKey: e.target.value }))}
-          >
-            <option value="">Subject</option>
-            {subjectOptions.map(o => (
-              <option key={o.key} value={o.key}>{o.label}</option>
-            ))}
-          </select>
-        </div>
+              <select
+                className="select select-bordered"
+                value={selected.subjectKey}
+                disabled={!selected.classKey || !selected.sectionKey}
+                onChange={(e) => setSelected(s => ({ ...s, subjectKey: e.target.value }))}
+              >
+                <option value="">Subject</option>
+                {subjectOptions.map(o => (
+                  <option key={o.key} value={o.key}>{o.label}</option>
+                ))}
+              </select>
+            </div>
 
-        {/* Title */}
-        <input
-          className="input input-bordered"
-          placeholder="Title"
-          value={selected.title}
-          onChange={(e) => setSelected(s => ({ ...s, title: e.target.value }))}
-        />
+            <input
+              className="input input-bordered"
+              placeholder="Title"
+              value={selected.title}
+              onChange={(e) => setSelected(s => ({ ...s, title: e.target.value }))}
+            />
 
-        {/* Instructions (optional) */}
-        <textarea
-          className="textarea textarea-bordered"
-          placeholder="Instructions (optional)"
-          value={selected.instructions}
-          onChange={(e) => setSelected(s => ({ ...s, instructions: e.target.value }))}
-        />
+            <textarea
+              className="textarea textarea-bordered"
+              placeholder="Instructions (optional)"
+              value={selected.instructions}
+              onChange={(e) => setSelected(s => ({ ...s, instructions: e.target.value }))}
+            />
 
-        {/* Due date (optional) */}
-        <input
-          type="date"
-          className="input input-bordered"
-          value={selected.due_date}
-          onChange={(e) => setSelected(s => ({ ...s, due_date: e.target.value }))}
-        />
+            <input
+              type="date"
+              className="input input-bordered"
+              value={selected.due_date}
+              onChange={(e) => setSelected(s => ({ ...s, due_date: e.target.value }))}
+            />
 
-        {/* File */}
-        <input
-          type="file"
-          accept="application/pdf"
-          className="file-input file-input-bordered"
-          onChange={(e) => setFile(e.target.files?.[0] || null)}
-        />
+            <input
+              type="file"
+              accept="application/pdf,image/*"
+              className="file-input file-input-bordered"
+              onChange={(e) => setFile(e.target.files?.[0] || null)}
+            />
 
-        <button className="btn btn-primary" disabled={saving}>
-          {saving ? "Saving…" : "Upload"}
-        </button>
+            <button className="btn btn-primary" disabled={saving}>
+              {saving ? "Saving…" : "Upload"}
+            </button>
+          </>
+        )}
+
+        {editing && (
+          <>
+            <div className="alert">
+              <span>Editing: <strong>{editing.title || "(untitled)"}</strong></span>
+            </div>
+
+            <input
+              className="input input-bordered"
+              placeholder="Title"
+              value={editing.title}
+              onChange={(e) => setEditing(s => ({ ...s, title: e.target.value }))}
+            />
+
+            <textarea
+              className="textarea textarea-bordered"
+              placeholder="Instructions (optional)"
+              value={editing.instructions}
+              onChange={(e) => setEditing(s => ({ ...s, instructions: e.target.value }))}
+            />
+
+            <input
+              type="date"
+              className="input input-bordered"
+              value={editing.due_date || ""}
+              onChange={(e) => setEditing(s => ({ ...s, due_date: e.target.value }))}
+            />
+
+            <div className="flex items-center gap-3">
+              {editing.fileUrl ? (
+                <a className="link" href={editing.fileUrl} target="_blank" rel="noreferrer">Current file</a>
+              ) : (
+                <span className="opacity-60 text-sm">No file uploaded</span>
+              )}
+            </div>
+
+            <input
+              type="file"
+              accept="application/pdf,image/*"
+              className="file-input file-input-bordered"
+              onChange={(e) => setEditFile(e.target.files?.[0] || null)}
+            />
+
+            <div className="flex gap-2">
+              <button className="btn btn-primary" disabled={saving}>
+                {saving ? "Saving…" : "Save changes"}
+              </button>
+              <button type="button" className="btn" onClick={cancelEdit}>Cancel</button>
+            </div>
+          </>
+        )}
       </form>
 
       {/* My uploads */}
@@ -308,20 +404,36 @@ export default function TeacherAssignments() {
           <ul className="space-y-2">
             {list.map((a) => {
               const labels = human(a);
+              const isImage = a.file && /\.(png|jpe?g|gif|webp)$/i.test(a.file);
               return (
                 <li key={a.id} className="flex items-center justify-between border rounded p-2">
-                  <div>
-                    <div className="font-semibold">{a.title}</div>
-                    <div className="text-sm opacity-70">
-                      {labels.cls} • {labels.sec} • {labels.sub}
-                      {a.due_date ? ` • Due: ${a.due_date}` : ""}
+                  <div className="flex items-center gap-3">
+                    {isImage && (
+                      <img
+                        src={a.file}
+                        alt={a.title}
+                        style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 8 }}
+                      />
+                    )}
+                    <div>
+                      <div className="font-semibold">{a.title}</div>
+                      <div className="text-sm opacity-70">
+                        {labels.cls} • {labels.sec} • {labels.sub}
+                        {a.due_date ? ` • Due: ${a.due_date}` : ""}
+                      </div>
+                      {a.instructions ? (
+                        <div className="text-sm mt-1 line-clamp-2">{a.instructions}</div>
+                      ) : null}
+                      {a.file && !isImage && (
+                        <a className="link text-sm" href={a.file} target="_blank" rel="noreferrer">Open file</a>
+                      )}
                     </div>
                   </div>
-                  {a.file ? (
-                    <a className="link" href={a.file} target="_blank" rel="noreferrer">Download PDF</a>
-                  ) : (
-                    <span className="opacity-60 text-sm">No file</span>
-                  )}
+
+                  <div className="flex items-center gap-2">
+                    <button className="btn btn-sm" onClick={() => openEdit(a)}>Edit</button>
+                    <button className="btn btn-sm btn-error" onClick={() => handleDelete(a.id)}>Delete</button>
+                  </div>
                 </li>
               );
             })}
