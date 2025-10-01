@@ -8,7 +8,7 @@ const formatDate = (dStr) => {
   if (!dStr) return "N/A";
   const d = new Date(dStr);
   if (isNaN(d)) return "N/A";
-  return new Intl.DateTimeFormat("bn-BD", {
+  return new Intl.DateTimeFormat("en-US", {
     year: "numeric",
     month: "short",
     day: "2-digit",
@@ -48,7 +48,7 @@ export default function AddNotice() {
       });
       setNotices(sorted);
     } catch {
-      toast.error("নোটিশ লোড করতে ব্যর্থ ❌");
+      toast.error("Failed to load notices ❌");
     } finally {
       setLoading(false);
     }
@@ -94,13 +94,13 @@ export default function AddNotice() {
   };
 
   const deleteNotice = async (id) => {
-    if (!window.confirm("আপনি কি নিশ্চিতভাবে নোটিশটি মুছে ফেলতে চান?")) return;
+    if (!window.confirm("Are you sure you want to delete this notice?")) return;
     try {
       await AxiosInstance.delete(`notices/${id}/`);
-      toast.success("নোটিশ মুছে ফেলা হয়েছে ✅");
+      toast.success("Notice deleted ✅");
       fetchNotices();
     } catch {
-      toast.error("নোটিশ মুছে ফেলতে ব্যর্থ ❌");
+      toast.error("Failed to delete notice ❌");
     }
   };
 
@@ -127,14 +127,14 @@ export default function AddNotice() {
     try {
       if (editMode) {
         await AxiosInstance.put(`notices/${editId}/`, payload);
-        toast.success("নোটিশ আপডেট হয়েছে ✅");
+        toast.success("Notice updated ✅");
       } else {
         await AxiosInstance.post("notices/", payload);
-        toast.success("নোটিশ যুক্ত হয়েছে ✅");
+        toast.success("Notice added ✅");
       }
       closeModalAndRefresh();
     } catch {
-      toast.error(editMode ? "আপডেট ব্যর্থ ❌" : "নোটিশ যুক্ত করতে ব্যর্থ ❌");
+      toast.error(editMode ? "Update failed ❌" : "Failed to add notice ❌");
     }
   };
 
@@ -148,7 +148,7 @@ export default function AddNotice() {
   };
 
   const resetForm = () => {
-    setFormData({ title: "", description: "",category: "", pdf_file: null });
+    setFormData({ title: "", description: "", category: "", pdf_file: null });
     const input = document.getElementById("pdf_input");
     if (input) input.value = "";
   };
@@ -158,15 +158,15 @@ export default function AddNotice() {
       {/* Header */}
       <div className="sticky top-0 z-10 mb-4 bg-base-100/80 backdrop-blur border border-base-300 rounded-xl p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3 shadow-sm">
         <div>
-          <h2 className="text-3xl font-bold text-primary">📌 নোটিশ বোর্ড</h2>
+          <h2 className="text-3xl font-bold text-primary">📌 Notice Board</h2>
           <p className="text-base opacity-70">
-            সর্বশেষ নোটিশগুলো উপরে প্রদর্শিত হবে
+            Latest notices appear at the top
           </p>
         </div>
         <div className="flex gap-2 w-full md:w-auto">
           <input
             type="text"
-            placeholder="খুঁজুন (শিরোনাম/বর্ণনা)…"
+            placeholder="Search (title/description)…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="input input-bordered w-full md:w-72 text-base"
@@ -183,12 +183,12 @@ export default function AddNotice() {
       {/* Table */}
       <div className="border border-base-300 rounded-xl shadow overflow-hidden">
         {loading ? (
-          <div className="p-10 text-center opacity-70 text-xl">লোড হচ্ছে…</div>
+          <div className="p-10 text-center opacity-70 text-xl">Loading…</div>
         ) : filtered.length === 0 ? (
           <div className="p-10 text-center">
-            <div className="text-xl font-semibold">কোন নোটিশ পাওয়া যায়নি</div>
+            <div className="text-xl font-semibold">No notices found</div>
             <div className="text-base opacity-70">
-              নতুন নোটিশ যোগ করতে “Add Notice” বাটনে ক্লিক করুন
+              Click “Add Notice” to create a new one
             </div>
           </div>
         ) : (
@@ -224,7 +224,9 @@ export default function AddNotice() {
                       </td>
                       <td>{notice.category}</td>
                       <td className="whitespace-nowrap">{formatDate(dStr)}</td>
-                      <td className="opacity-90">{truncate(notice.description)}</td>
+                      <td className="opacity-90">
+                        {truncate(notice.description)}
+                      </td>
                       <td className="text-center">
                         {notice.pdf_file ? (
                           <a
@@ -262,7 +264,7 @@ export default function AddNotice() {
               <tfoot>
                 <tr>
                   <td colSpan={6} className="text-right p-3 opacity-70 text-base">
-                    মোট: {filtered.length} টি নোটিশ
+                    Total: {filtered.length} notices
                   </td>
                 </tr>
               </tfoot>
@@ -292,7 +294,7 @@ export default function AddNotice() {
                 value={formData.title}
                 onChange={handleChange}
                 className="input input-bordered w-full text-lg"
-                placeholder="নোটিশের শিরোনাম"
+                placeholder="Notice title"
               />
             </div>
 
@@ -308,11 +310,10 @@ export default function AddNotice() {
                 className="select select-bordered select-sm w-full focus:outline-none focus:ring ring-primary/30"
               >
                 <option value="">Select Category</option>
-                <option value="government_order">সরকারি আদেশ</option>
-                <option value="executive_order">নির্বাহী আদেশ</option>
-                <option value="notification">প্রজ্ঞাপন</option>
-
-              </select> 
+                <option value="government_order">Government Order</option>
+                <option value="executive_order">Executive Order</option>
+                <option value="notification">Notification</option>
+              </select>
             </div>
 
             <div className="form-control">
@@ -324,7 +325,7 @@ export default function AddNotice() {
                 value={formData.description}
                 onChange={handleChange}
                 className="textarea textarea-bordered w-full min-h-28 text-lg"
-                placeholder="সংক্ষিপ্ত বর্ণনা (ঐচ্ছিক)"
+                placeholder="Short description (optional)"
               />
             </div>
 

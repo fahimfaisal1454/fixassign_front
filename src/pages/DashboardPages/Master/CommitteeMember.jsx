@@ -26,7 +26,7 @@ const CommitteeMembers = () => {
       const res = await AxiosInstance.get("committee-members/");
       setMembers(res.data);
     } catch (err) {
-      toast.error("তথ্য লোড করতে ব্যর্থ হয়েছে");
+      toast.error("Failed to load data");
     }
   };
 
@@ -54,15 +54,15 @@ const CommitteeMembers = () => {
     try {
       if (isEditing) {
         await AxiosInstance.put(`committee-members/${currentId}/`, data);
-        toast.success("সদস্য হালনাগাদ হয়েছে");
+        toast.success("Member updated");
       } else {
         await AxiosInstance.post("committee-members/", data);
-        toast.success("সদস্য যোগ হয়েছে");
+        toast.success("Member added");
       }
       fetchData();
       resetForm();
     } catch (err) {
-      toast.error("সমস্যা হয়েছে, আবার চেষ্টা করুন");
+      toast.error("Something went wrong, please try again");
     }
   };
 
@@ -95,13 +95,13 @@ const CommitteeMembers = () => {
   };
 
   const handleDelete = async (id) => {
-    if (!confirm("আপনি কি নিশ্চিত?")) return;
+    if (!confirm("Are you sure?")) return;
     try {
       await AxiosInstance.delete(`committee-members/${id}/`);
-      toast.success("সদস্য মুছে ফেলা হয়েছে");
+      toast.success("Member deleted");
       fetchData();
     } catch (err) {
-      toast.error("ডিলিট করতে সমস্যা হয়েছে");
+      toast.error("Failed to delete member");
     }
   };
 
@@ -128,7 +128,7 @@ const CommitteeMembers = () => {
     <div className="p-4">
       <Toaster />
       <h2 className="text-2xl font-bold mb-6 text-gray-800 dark:text-white">
-        ম্যানেজিং কমিটি
+        Managing Committee
       </h2>
 
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
@@ -136,7 +136,7 @@ const CommitteeMembers = () => {
           <div className="relative w-full md:w-48">
             <input
               type="text"
-              placeholder="নাম অনুসন্ধান"
+              placeholder="Search by name"
               className="w-full pl-10 pr-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
               value={filters.name}
               onChange={(e) => setFilters({ ...filters, name: e.target.value })}
@@ -162,7 +162,7 @@ const CommitteeMembers = () => {
           <div className="relative w-full md:w-48">
             <input
               type="text"
-              placeholder="পদবি অনুসন্ধান"
+              placeholder="Search by role"
               className="w-full pl-10 pr-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
               value={filters.role}
               onChange={(e) => setFilters({ ...filters, role: e.target.value })}
@@ -202,7 +202,7 @@ const CommitteeMembers = () => {
               clipRule="evenodd"
             />
           </svg>
-          সদস্য যোগ করুন
+          Add Member
         </button>
       </div>
 
@@ -212,7 +212,7 @@ const CommitteeMembers = () => {
           <div className="modal-box max-w-md">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-lg text-center font-bold">
-                {isEditing ? "সদস্য হালনাগাদ" : "নতুন সদস্য যোগ করুন"}
+                {isEditing ? "Update Member" : "Add New Member"}
               </h3>
               <button onClick={resetForm} className="btn btn-sm btn-circle">
                 ✕
@@ -232,7 +232,7 @@ const CommitteeMembers = () => {
             <form onSubmit={handleSubmit} className="space-y-1">
               <div>
                 <label className="block text-sm text-gray-500 dark:text-gray-300 mb-1">
-                  পূর্ণ নাম
+                  Full Name
                 </label>
                 <input
                   type="text"
@@ -246,7 +246,7 @@ const CommitteeMembers = () => {
 
               <div>
                 <label className="block text-sm text-gray-500 dark:text-gray-300 mb-1">
-                  পদবি
+                  Role
                 </label>
                 <input
                   type="text"
@@ -260,7 +260,7 @@ const CommitteeMembers = () => {
 
               <div>
                 <label className="block text-sm text-gray-500 dark:text-gray-300 mb-1">
-                  ইমেইল
+                  Email
                 </label>
                 <div className="relative">
                   <span className="absolute left-3 top-3 text-gray-400">
@@ -291,7 +291,7 @@ const CommitteeMembers = () => {
 
               <div>
                 <label className="block text-sm text-gray-500 dark:text-gray-300 mb-1">
-                  ফোন
+                  Phone
                 </label>
                 <div className="relative">
                   <span className="absolute left-3 top-3 text-gray-400">
@@ -322,7 +322,7 @@ const CommitteeMembers = () => {
 
               <div>
                 <label className="block text-sm text-gray-500 dark:text-gray-300 mb-1">
-                  ছবি
+                  Photo
                 </label>
                 <input
                   type="file"
@@ -337,7 +337,7 @@ const CommitteeMembers = () => {
                   type="submit"
                   className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
                 >
-                  সংরক্ষণ করুন
+                  Save
                 </button>
               </div>
             </form>
@@ -351,12 +351,12 @@ const CommitteeMembers = () => {
           <thead className="bg-blue-500 text-white text-sm text-center dark:bg-gray-700">
             <tr>
               <th className="py-3 px-4">#</th>
-              <th className="py-3 px-4">ছবি</th>
-              <th className="py-3 px-4">নাম</th>
-              <th className="py-3 px-4">পদবি</th>
-              <th className="py-3 px-4">ইমেইল</th>
-              <th className="py-3 px-4">ফোন</th>
-              <th className="py-3 px-4">অ্যাকশন</th>
+              <th className="py-3 px-4">Photo</th>
+              <th className="py-3 px-4">Name</th>
+              <th className="py-3 px-4">Role</th>
+              <th className="py-3 px-4">Email</th>
+              <th className="py-3 px-4">Phone</th>
+              <th className="py-3 px-4">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
@@ -415,13 +415,13 @@ const CommitteeMembers = () => {
                       onClick={() => handleEdit(m)}
                       className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors dark:bg-blue-500 dark:hover:bg-blue-600"
                     >
-                      এডিট
+                      Edit
                     </button>
                     <button
                       onClick={() => handleDelete(m.id)}
                       className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 transition-colors dark:bg-red-500 dark:hover:bg-red-600"
                     >
-                      ডিলিট
+                      Delete
                     </button>
                   </td>
                 </tr>
@@ -432,7 +432,7 @@ const CommitteeMembers = () => {
                   colSpan="7"
                   className="py-4 text-center text-gray-500 dark:text-gray-400"
                 >
-                  কোন সদস্য পাওয়া যায়নি
+                  No members found
                 </td>
               </tr>
             )}
@@ -449,7 +449,7 @@ const CommitteeMembers = () => {
               disabled={pagination.currentPage === 1}
               className="px-3 py-1 rounded border border-gray-300 dark:border-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              পূর্ববর্তী
+              Previous
             </button>
 
             {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
@@ -471,7 +471,7 @@ const CommitteeMembers = () => {
               disabled={pagination.currentPage === totalPages}
               className="px-3 py-1 rounded border border-gray-300 dark:border-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              পরবর্তী
+              Next
             </button>
           </nav>
         </div>

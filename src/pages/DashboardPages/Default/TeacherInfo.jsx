@@ -1,9 +1,11 @@
 // src/pages/DashboardPages/academics/TeacherInfo.jsx
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import Select from "react-select";
 import { toast, Toaster } from "react-hot-toast";
 import AxiosInstance from "../../../components/AxiosInstance";
+
+/* ------------------------------ Defaults ------------------------------ */
 
 const emptyTeacher = {
   full_name: "",
@@ -15,8 +17,42 @@ const emptyTeacher = {
   photo: null,
 };
 
+/* ---------------- Username helpers (FIRST NAME + 3 DIGITS) -------------- */
+
+// Always build the base from the **first name**
+const firstNameBase = (fullName = "") => {
+  const cleaned = fullName
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const parts = cleaned.split(" ").filter(Boolean);
+  const first = parts[0] || "user";
+  const base = first.replace(/[^a-z0-9]/g, "");
+  return base.length ? base : "user";
+};
+
+// 3-digit suffix (100–999)
+const rand3 = () => Math.floor(100 + Math.random() * 900);
+
+// Suggestion: firstName + 3 digits (e.g., karim345)
+const suggestUsername = (fullName = "") => `${firstNameBase(fullName)}${rand3()}`;
+
+/* -------------------------------- Component ------------------------------- */
+
 export default function TeacherInfo() {
   const navigate = useNavigate();
+
+  // Abort for username check; timers for debounced checks
+  const usernameAbortRef = useRef(null);
+  const emailTimerRef = useRef(null);
+  const phoneTimerRef = useRef(null);
+  // Sequence guards to ignore stale async validation responses
+  const emailCheckSeq = useRef(0);
+  const phoneCheckSeq = useRef(0);
 
   // UI
   const [loading, setLoading] = useState(false);
@@ -37,14 +73,40 @@ export default function TeacherInfo() {
   // Subject options mode
   const [showSubjectsByClass, setShowSubjectsByClass] = useState(false);
 
-  // Form
+  // Teacher Form
   const [form, setForm] = useState(emptyTeacher);
+
+  // Inline create user (like StudentInfo)
+  const [createLogin, setCreateLogin] = useState(false);
+  const [userForm, setUserForm] = useState({
+    username: "",
+    email: "",
+    phone: "",
+    password: "",
+    must_change_password: true,
+    is_active: true,
+  });
+
+  // Username check state
+  const [usernameStatus, setUsernameStatus] = useState("idle"); // idle | checking | available
+  const [usernameHint, setUsernameHint] = useState("");
+
+  // Email/Phone availability UI state
+  const [emailState, setEmailState] = useState({ status: "idle", message: "" }); // idle|checking|ok|taken
+  const [phoneState, setPhoneState] = useState({ status: "idle", message: "" }); // idle|checking|ok|taken
+
+  const onUserChange = (k, v) => {
+    setUserForm((s) => ({ ...s, [k]: v }));
+    if (k === "username") {
+      setUsernameStatus("idle");
+      setUsernameHint("");
+    }
+  };
 
   /* ----------------------------- Fetch Helpers ----------------------------- */
 
   const loadSubjects = async () => {
     try {
-      // If your API supports filtering by class, you can pass ?class_id=...
       const res = await AxiosInstance.get("subjects/");
       setSubjects(Array.isArray(res.data) ? res.data : []);
     } catch (e) {
@@ -72,6 +134,14 @@ export default function TeacherInfo() {
       await loadSubjects();
       await loadTeachers();
     })();
+  }, []);
+
+  // Cleanup timers on unmount
+  useEffect(() => {
+    return () => {
+      if (emailTimerRef.current) clearTimeout(emailTimerRef.current);
+      if (phoneTimerRef.current) clearTimeout(phoneTimerRef.current);
+    };
   }, []);
 
   /* ----------------------------- Normalization ----------------------------- */
@@ -163,6 +233,221 @@ export default function TeacherInfo() {
     return data;
   }, [teachers, search, designationFilter]);
 
+  /* ------------------------- Username availability ------------------------- */
+
+  // Checks if a username already exists on server.
+  // Supports:
+  //  - GET admin/users/exists/?username=<u> -> {exists: boolean}
+  //  - GET admin/users/?username=<u>       -> [...]
+  //  - GET admin/users/?search=<u>         -> [...]
+  const usernameExists = async (u) => {
+    if (!u) return false;
+
+    if (usernameAbortRef.current) usernameAbortRef.current.abort();
+    const controller = new AbortController();
+    usernameAbortRef.current = controller;
+
+    try {
+      // 1) Dedicated endpoint
+      try {
+        const res = await AxiosInstance.get("admin/users/exists/", {
+          params: { username: u },
+          signal: controller.signal,
+        });
+        if (typeof res?.data?.exists === "boolean") return !!res.data.exists;
+      } catch {
+        /* ignore */
+      }
+
+      // 2) Exact query
+      try {
+        const res = await AxiosInstance.get("admin/users/", {
+          params: { username: u },
+          signal: controller.signal,
+        });
+        if (Array.isArray(res.data)) {
+          return res.data.some((it) => (it?.username || "").toLowerCase() === u.toLowerCase());
+        }
+      } catch {
+        /* ignore */
+      }
+
+      // 3) Search fallback
+      const res = await AxiosInstance.get("admin/users/", {
+        params: { search: u },
+        signal: controller.signal,
+      });
+      if (Array.isArray(res.data)) {
+        return res.data.some((it) => (it?.username || "").toLowerCase() === u.toLowerCase());
+      }
+    } catch {
+      return false; // fail-open
+    } finally {
+      if (usernameAbortRef.current === controller) usernameAbortRef.current = null;
+    }
+    return false;
+  };
+
+  // Always stick to FIRST-NAME base for retries
+  const findAvailableUsername = async (preferred) => {
+    let attempt = preferred?.trim();
+    if (!attempt) attempt = suggestUsername(form.full_name);
+    if (!(await usernameExists(attempt))) return attempt;
+
+    const base = firstNameBase(form.full_name);
+    for (let i = 0; i < 8; i++) {
+      const candidate = `${base}${rand3()}`;
+      if (!(await usernameExists(candidate))) return candidate;
+    }
+    return `${base}${Date.now().toString().slice(-5)}`;
+  };
+
+  const checkAndFixUsername = async () => {
+    const u = (userForm.username || "").trim();
+    if (!u) {
+      const generated = await findAvailableUsername("");
+      onUserChange("username", generated);
+      setUsernameStatus("available");
+      setUsernameHint("Suggested a unique username.");
+      return;
+    }
+
+    setUsernameStatus("checking");
+    setUsernameHint("Checking availability…");
+
+    const exists = await usernameExists(u);
+    if (!exists) {
+      setUsernameStatus("available");
+      setUsernameHint("Username is available.");
+    } else {
+      const next = await findAvailableUsername(u);
+      onUserChange("username", next);
+      setUsernameStatus("available");
+      setUsernameHint(`That username was taken — suggested "${next}".`);
+    }
+  };
+
+  /* -------- Email / Phone uniqueness (teachers & users) + debounce -------- */
+
+  // Utility to test if value is used by another teacher (excluding currentId when editing).
+  // IMPORTANT: Strict comparisons only (no fuzzy search), normalized cases/spaces.
+  const valueUsedByAnotherTeacher = async (field, value, excludeId) => {
+    if (!value) return false;
+    try {
+      const params = field === "email" ? { contact_email: value } : { contact_phone: value };
+      const res = await AxiosInstance.get("teachers/", { params });
+      if (Array.isArray(res.data)) {
+        return res.data.some((t) => {
+          // When editing, ignore the current record
+          if (excludeId && String(t.id) === String(excludeId)) return false;
+          return field === "email"
+            ? (t.contact_email || "").toLowerCase() === value.toLowerCase()
+            : (t.contact_phone || "").trim() === value.trim();
+        });
+      }
+    } catch {
+      // No fuzzy fallback here on purpose to avoid false positives
+      return false; // fail-open; backend still enforces
+    }
+    return false;
+  };
+
+  // Also check against users (avoid duplicate email/phone in accounts)
+  const valueUsedByUser = async (field, value) => {
+    if (!value) return false;
+    try {
+      const params = field === "email" ? { email: value } : { phone: value };
+      const res = await AxiosInstance.get("admin/users/", { params });
+      if (Array.isArray(res.data)) {
+        return res.data.some((u) =>
+          field === "email"
+            ? (u.email || "").toLowerCase() === value.toLowerCase()
+            : (u.phone || "").trim() === value.trim()
+        );
+      }
+    } catch {
+      // No search fallback to keep it strict
+      return false; // fail-open
+    }
+    return false;
+  };
+
+  // Returns boolean and updates state (sequence guarded)
+  const checkEmailUnique = async () => {
+    const email = (form.contact_email || "").trim();
+    const mySeq = ++emailCheckSeq.current;
+    if (!email) {
+      if (mySeq === emailCheckSeq.current) {
+        setEmailState({ status: "idle", message: "" });
+      }
+      return true;
+    }
+    if (mySeq === emailCheckSeq.current) {
+      setEmailState({ status: "checking", message: "Checking…" });
+    }
+    const usedByTeacher = await valueUsedByAnotherTeacher(
+      "email",
+      email,
+      isEditing ? currentId : null
+    );
+    const usedByUser = await valueUsedByUser("email", email);
+
+    if (mySeq !== emailCheckSeq.current) return true; // stale response
+
+    if (usedByTeacher || usedByUser) {
+      setEmailState({ status: "taken", message: "Email is already in use." });
+      return false;
+    } else {
+      setEmailState({ status: "ok", message: "Email is available." });
+      return true;
+    }
+  };
+
+  // Returns boolean and updates state (sequence guarded)
+  const checkPhoneUnique = async () => {
+    const phone = (form.contact_phone || "").trim();
+    const mySeq = ++phoneCheckSeq.current;
+    if (!phone) {
+      if (mySeq === phoneCheckSeq.current) {
+        setPhoneState({ status: "idle", message: "" });
+      }
+      return true;
+    }
+    if (mySeq === phoneCheckSeq.current) {
+      setPhoneState({ status: "checking", message: "Checking…" });
+    }
+    const usedByTeacher = await valueUsedByAnotherTeacher(
+      "phone",
+      phone,
+      isEditing ? currentId : null
+    );
+    const usedByUser = await valueUsedByUser("phone", phone);
+
+    if (mySeq !== phoneCheckSeq.current) return true; // stale response
+
+    if (usedByTeacher || usedByUser) {
+      setPhoneState({ status: "taken", message: "Phone number is already in use." });
+      return false;
+    } else {
+      setPhoneState({ status: "ok", message: "Phone number is available." });
+      return true;
+    }
+  };
+
+  // Debounced triggers on change (no immediate "checking" flicker)
+  const scheduleEmailCheck = () => {
+    if (emailTimerRef.current) clearTimeout(emailTimerRef.current);
+    emailTimerRef.current = setTimeout(() => {
+      checkEmailUnique();
+    }, 400);
+  };
+  const schedulePhoneCheck = () => {
+    if (phoneTimerRef.current) clearTimeout(phoneTimerRef.current);
+    phoneTimerRef.current = setTimeout(() => {
+      checkPhoneUnique();
+    }, 400);
+  };
+
   /* --------------------------------- CRUD ---------------------------------- */
 
   const openCreate = () => {
@@ -170,6 +455,20 @@ export default function TeacherInfo() {
     setCurrentId(null);
     setIsEditing(false);
     setIsModalOpen(true);
+
+    setCreateLogin(false);
+    setUserForm({
+      username: "",
+      email: "",
+      phone: "",
+      password: "",
+      must_change_password: true,
+      is_active: true,
+    });
+    setUsernameStatus("idle");
+    setUsernameHint("");
+    setEmailState({ status: "idle", message: "" });
+    setPhoneState({ status: "idle", message: "" });
   };
 
   const openEdit = (row) => {
@@ -185,6 +484,18 @@ export default function TeacherInfo() {
     setCurrentId(row.id);
     setIsEditing(true);
     setIsModalOpen(true);
+
+    setCreateLogin(false);
+    setUserForm((u) => ({
+      ...u,
+      username: "",
+      email: row.contact_email || "",
+      phone: row.contact_phone || "",
+    }));
+    setUsernameStatus("idle");
+    setUsernameHint("");
+    setEmailState({ status: "idle", message: "" });
+    setPhoneState({ status: "idle", message: "" });
   };
 
   const handleDelete = async (row) => {
@@ -205,8 +516,17 @@ export default function TeacherInfo() {
       toast.error("Full name is required");
       return;
     }
+
+    // Ensure latest result (don’t rely on possibly stale UI state)
+    const [emailOK, phoneOK] = await Promise.all([checkEmailUnique(), checkPhoneUnique()]);
+    if (!emailOK || !phoneOK) {
+      toast.error("Fix duplicate email/phone before saving.");
+      return;
+    }
+
     setSubmitting(true);
     try {
+      // 1) Create / update teacher
       const fd = new FormData();
       fd.append("full_name", form.full_name.trim());
       if (form.designation) fd.append("designation", form.designation);
@@ -216,33 +536,72 @@ export default function TeacherInfo() {
       if (form.subject) fd.append("subject", String(form.subject)); // send ID
       if (form.photo) fd.append("photo", form.photo);
 
+      let teacherId = currentId;
       if (isEditing) {
         await AxiosInstance.put(`teachers/${currentId}/`, fd, {
           headers: { "Content-Type": "multipart/form-data" },
         });
         toast.success("Updated");
       } else {
-        await AxiosInstance.post("teachers/", fd, {
+        const res = await AxiosInstance.post("teachers/", fd, {
           headers: { "Content-Type": "multipart/form-data" },
         });
+        teacherId = res?.data?.id ?? teacherId;
         toast.success("Created");
       }
+
+      // 2) Optionally create + link login (Teacher role)
+      if (createLogin && teacherId) {
+        // ensure username is unique
+        const finalUsername = await findAvailableUsername(userForm.username);
+
+        // guard against account-level email/phone duplicates
+        const emailTaken = await valueUsedByUser("email", userForm.email || form.contact_email);
+        const phoneTaken = await valueUsedByUser("phone", userForm.phone || form.contact_phone);
+        if (emailTaken) throw new Error("User email already in use.");
+        if (phoneTaken) throw new Error("User phone already in use.");
+
+        const payload = {
+          username: finalUsername,
+          email: userForm.email || form.contact_email || "",
+          phone: userForm.phone || form.contact_phone || "",
+          role: "Teacher",
+          password: userForm.password || undefined, // server can generate temp
+          must_change_password: !!userForm.must_change_password,
+          is_active: !!userForm.is_active,
+        };
+
+        const uRes = await AxiosInstance.post("admin/users/", payload);
+        const newUser = uRes?.data;
+
+        await AxiosInstance.post(`teachers/${teacherId}/link-user/`, {
+          user_id: newUser?.id,
+        });
+
+        if (newUser?.temp_password) {
+          toast.success(
+            `Login "${finalUsername}" created & linked. Temp password: ${newUser.temp_password}`
+          );
+        } else {
+          toast.success(`Login "${finalUsername}" created & linked.`);
+        }
+      }
+
       setIsModalOpen(false);
       setForm(emptyTeacher);
       await loadTeachers();
-    } catch (e) {
-      console.error(e);
+    } catch (e2) {
       const msg =
-        e?.response?.data && typeof e.response.data === "object"
-          ? JSON.stringify(e.response.data)
-          : "Save failed";
+        e2?.response?.data && typeof e2.response.data === "object"
+          ? JSON.stringify(e2.response.data)
+          : e2?.message || "Save failed";
       toast.error(msg);
     } finally {
       setSubmitting(false);
     }
   };
 
-  /* ------------------------------ Create Login ----------------------------- */
+  /* ------------------------------ Create Login (legacy button path kept) ----------------------------- */
 
   const goCreateLogin = (t) => {
     if (isLinked(t)) {
@@ -425,7 +784,14 @@ export default function TeacherInfo() {
                     className="w-full border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 p-2 rounded-lg"
                     placeholder="Full name"
                     value={form.full_name}
-                    onChange={(e) => setForm((f) => ({ ...f, full_name: e.target.value }))}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setForm((f) => ({ ...f, full_name: v }));
+                      // prefill username only if empty
+                      if (!userForm.username) {
+                        onUserChange("username", suggestUsername(v));
+                      }
+                    }}
                     required
                   />
                 </div>
@@ -441,9 +807,7 @@ export default function TeacherInfo() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">
-                    Subject
-                  </label>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Subject</label>
 
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-[11px] text-slate-500">
@@ -477,6 +841,7 @@ export default function TeacherInfo() {
                   />
                 </div>
 
+                {/* Email with live availability */}
                 <div>
                   <label className="block text-xs font-medium text-slate-600 mb-1">Email</label>
                   <input
@@ -484,18 +849,57 @@ export default function TeacherInfo() {
                     className="w-full border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 p-2 rounded-lg"
                     placeholder="Email"
                     value={form.contact_email}
-                    onChange={(e) => setForm((f) => ({ ...f, contact_email: e.target.value }))}
+                    onChange={(e) => {
+                      setForm((f) => ({ ...f, contact_email: e.target.value }));
+                      // Debounced; "Checking…" flips when the check actually runs
+                      scheduleEmailCheck();
+                    }}
+                    onBlur={checkEmailUnique}
                   />
+                  {emailState.status !== "idle" && (
+                    <p
+                      className={
+                        "text-[11px] mt-1 " +
+                        (emailState.status === "ok"
+                          ? "text-emerald-600"
+                          : emailState.status === "taken"
+                          ? "text-rose-600"
+                          : "text-slate-500")
+                      }
+                    >
+                      {emailState.message}
+                    </p>
+                  )}
                 </div>
 
+                {/* Phone with live availability */}
                 <div>
                   <label className="block text-xs font-medium text-slate-600 mb-1">Phone</label>
                   <input
                     className="w-full border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 p-2 rounded-lg"
                     placeholder="Phone"
                     value={form.contact_phone}
-                    onChange={(e) => setForm((f) => ({ ...f, contact_phone: e.target.value }))}
+                    onChange={(e) => {
+                      setForm((f) => ({ ...f, contact_phone: e.target.value }));
+                      // Debounced; "Checking…" flips when the check actually runs
+                      schedulePhoneCheck();
+                    }}
+                    onBlur={checkPhoneUnique}
                   />
+                  {phoneState.status !== "idle" && (
+                    <p
+                      className={
+                        "text-[11px] mt-1 " +
+                        (phoneState.status === "ok"
+                          ? "text-emerald-600"
+                          : phoneState.status === "taken"
+                          ? "text-rose-600"
+                          : "text-slate-500")
+                      }
+                    >
+                      {phoneState.message}
+                    </p>
+                  )}
                 </div>
 
                 <div>
@@ -521,10 +925,138 @@ export default function TeacherInfo() {
                   />
                 </div>
 
+                {/* ===== Inline user create (like StudentInfo) ===== */}
+                <div className="md:col-span-2 mt-2 border-t pt-3">
+                  <label className="inline-flex items-center gap-2 text-sm font-semibold mb-2">
+                    <input
+                      type="checkbox"
+                      checked={createLogin}
+                      onChange={(e) => setCreateLogin(e.target.checked)}
+                    />
+                    Create login for this teacher
+                  </label>
+
+                  {createLogin && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-slate-600 mb-1">
+                          Username
+                        </label>
+                        <div className="flex gap-2">
+                          <input
+                            className="w-full border border-slate-300 p-2 rounded-lg"
+                            placeholder="username"
+                            value={userForm.username}
+                            onChange={(e) => onUserChange("username", e.target.value)}
+                            onBlur={checkAndFixUsername}
+                          />
+                          <button
+                            type="button"
+                            onClick={checkAndFixUsername}
+                            className="px-3 py-2 rounded-lg border hover:bg-slate-50"
+                            title="Check availability"
+                          >
+                            Check
+                          </button>
+                        </div>
+                        {usernameStatus !== "idle" && (
+                          <p
+                            className={
+                              "text-[11px] mt-1 " +
+                              (usernameStatus === "available"
+                                ? "text-emerald-600"
+                                : "text-slate-500")
+                            }
+                          >
+                            {usernameStatus === "checking" ? "Checking…" : usernameHint}
+                          </p>
+                        )}
+                        <p className="text-[11px] text-slate-500">
+                          Leave blank to auto-suggest from first name (e.g., karim345).
+                        </p>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-medium text-slate-600 mb-1">
+                          Email
+                        </label>
+                        <input
+                          type="email"
+                          className="w-full border border-slate-300 p-2 rounded-lg"
+                          placeholder="teacher@email.com"
+                          value={userForm.email || form.contact_email}
+                          onChange={(e) => onUserChange("email", e.target.value)}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-medium text-slate-600 mb-1">
+                          Phone
+                        </label>
+                        <input
+                          className="w-full border border-slate-300 p-2 rounded-lg"
+                          placeholder="01XXXXXXXXX"
+                          value={userForm.phone || form.contact_phone}
+                          onChange={(e) => onUserChange("phone", e.target.value)}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-medium text-slate-600 mb-1">
+                          Password (optional)
+                        </label>
+                        <input
+                          type="text"
+                          className="w-full border border-slate-300 p-2 rounded-lg"
+                          placeholder="Leave empty to auto-generate"
+                          value={userForm.password}
+                          onChange={(e) => onUserChange("password", e.target.value)}
+                        />
+                        <p className="text-[11px] text-slate-500 mt-1">
+                          If empty, a temporary password will be generated.
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        <label className="inline-flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={userForm.must_change_password}
+                            onChange={(e) => onUserChange("must_change_password", e.target.checked)}
+                          />
+                          Must change password on first login
+                        </label>
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        <label className="inline-flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={userForm.is_active}
+                            onChange={(e) => onUserChange("is_active", e.target.checked)}
+                          />
+                          Active
+                        </label>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 <button
                   type="submit"
-                  disabled={submitting}
+                  disabled={
+                    submitting ||
+                    emailState.status === "taken" ||
+                    phoneState.status === "taken" ||
+                    emailState.status === "checking" ||
+                    phoneState.status === "checking"
+                  }
                   className="w-full mt-2 bg-blue-600 text-white py-2.5 rounded-xl font-semibold hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 md:col-span-2 disabled:opacity-50"
+                  title={
+                    emailState.status === "taken" || phoneState.status === "taken"
+                      ? "Resolve duplicate email/phone"
+                      : ""
+                  }
                 >
                   {submitting ? "Saving..." : isEditing ? "Update" : "Save"}
                 </button>

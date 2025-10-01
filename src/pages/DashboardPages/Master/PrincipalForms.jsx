@@ -56,7 +56,6 @@ export default function PrincipalForms() {
           }
         });
 
-        console.log("Existing data after processing:", newExistingData); // Debug line
         setExistingData(newExistingData);
 
         // Update form data with existing data
@@ -123,10 +122,8 @@ export default function PrincipalForms() {
     const formData = formsData[designation];
     const formPayload = new FormData();
 
-    // Explicitly add designation first
     formPayload.append("designation", designation);
 
-    // Add other fields
     Object.keys(formData).forEach((key) => {
       if (
         formData[key] !== null &&
@@ -137,23 +134,12 @@ export default function PrincipalForms() {
       }
     });
 
-    // Debug: Check what's being sent
-    console.log(`Submitting ${designation} data:`, {
-      designation,
-      existingData: existingData[designation],
-      formData: Object.fromEntries(formPayload.entries()),
-    });
-
     try {
       setIsLoading((prev) => ({ ...prev, [designation]: true }));
 
       let response;
       if (existingData[designation]) {
-        // Update existing data
-        console.log(
-          `Updating ${designation} with ID:`,
-          existingData[designation].id
-        );
+        // Update existing
         response = await AxiosInstance.put(
           `principal-vice-principal/${existingData[designation].id}/`,
           formPayload,
@@ -162,8 +148,7 @@ export default function PrincipalForms() {
           }
         );
       } else {
-        // Create new data
-        console.log(`Creating new ${designation}`);
+        // Create new
         response = await AxiosInstance.post(
           "principal-vice-principal/",
           formPayload,
@@ -173,7 +158,6 @@ export default function PrincipalForms() {
         );
       }
 
-      // Update the existing data state with the response
       setExistingData((prev) => ({
         ...prev,
         [designation]: response.data,
@@ -181,13 +165,12 @@ export default function PrincipalForms() {
 
       toast.success(
         `${
-          designation === "principal" ? "প্রধান শিক্ষক" : "সহকারি প্রধান শিক্ষক"
-        } তথ্য সফলভাবে ${
-          existingData[designation] ? "আপডেট" : "সংরক্ষণ"
-        } করা হয়েছে!`
+          designation === "principal" ? "Principal" : "Vice Principal"
+        } information has been successfully ${
+          existingData[designation] ? "updated" : "saved"
+        }!`
       );
 
-      // Update the preview with the new photo URL if it was uploaded
       if (formData.photo) {
         setFormsData((prev) => ({
           ...prev,
@@ -199,16 +182,16 @@ export default function PrincipalForms() {
       }
     } catch (error) {
       console.error(`Error saving ${designation} data:`, error);
-      console.error("Error details:", error.response?.data);
       toast.error(
         `${
-          designation === "principal" ? "প্রধান শিক্ষক" : "সহকারি প্রধান শিক্ষক"
-        } তথ্য সংরক্ষণে ব্যর্থ হয়েছে`
+          designation === "principal" ? "Principal" : "Vice Principal"
+        } information could not be saved`
       );
     } finally {
       setIsLoading((prev) => ({ ...prev, [designation]: false }));
     }
   };
+
   const renderForm = (designation) => {
     const formData = formsData[designation];
     const loading = isLoading[designation];
@@ -220,7 +203,7 @@ export default function PrincipalForms() {
         className="mb-8 p-6 border border-gray-200 rounded-lg"
       >
         <h3 className="text-lg text-center font-semibold text-gray-800 mb-4">
-          {designation === "principal" ? "প্রধান শিক্ষক" : "সহকারি প্রধান শিক্ষক"} এর তথ্য
+          {designation === "principal" ? "Principal" : "Vice Principal"} Info
         </h3>
 
         {formData.preview && (
@@ -242,7 +225,7 @@ export default function PrincipalForms() {
           {/* Photo Upload */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              ছবি
+              Photo
             </label>
             <input
               type="file"
@@ -259,7 +242,7 @@ export default function PrincipalForms() {
           {/* Full Name */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              পূর্ণ নাম*
+              Full Name*
             </label>
             <input
               type="text"
@@ -267,7 +250,7 @@ export default function PrincipalForms() {
               value={formData.full_name}
               onChange={(e) => handleChange(designation, e)}
               className="w-full px-3 py-2 text-sm text-gray-800 bg-white border border-gray-200 rounded focus:border-lime-400 focus:outline-none"
-              placeholder="পূর্ণ নাম লিখুন"
+              placeholder="Enter full name"
               required
             />
           </div>
@@ -276,7 +259,7 @@ export default function PrincipalForms() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                ইমেইল
+                Email
               </label>
               <input
                 type="email"
@@ -284,12 +267,12 @@ export default function PrincipalForms() {
                 value={formData.contact_email}
                 onChange={(e) => handleChange(designation, e)}
                 className="w-full px-3 py-2 text-sm text-gray-800 bg-white border border-gray-200 rounded focus:border-lime-400 focus:outline-none"
-                placeholder="ইমেইল ঠিকানা"
+                placeholder="Email address"
               />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                ফোন নম্বর
+                Phone Number
               </label>
               <input
                 type="text"
@@ -297,7 +280,7 @@ export default function PrincipalForms() {
                 value={formData.contact_phone}
                 onChange={(e) => handleChange(designation, e)}
                 className="w-full px-3 py-2 text-sm text-gray-800 bg-white border border-gray-200 rounded focus:border-lime-400 focus:outline-none"
-                placeholder="মোবাইল নম্বর"
+                placeholder="Mobile number"
               />
             </div>
           </div>
@@ -305,14 +288,14 @@ export default function PrincipalForms() {
           {/* Message Textarea */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              বার্তা/মন্তব্য
+              Message/Note
             </label>
             <textarea
               name="message"
               value={formData.message}
               onChange={(e) => handleChange(designation, e)}
               className="w-full px-3 py-2 text-sm text-gray-800 bg-white border border-gray-200 rounded focus:border-lime-400 focus:outline-none"
-              placeholder="কোনো বার্তা বা মন্তব্য লিখুন"
+              placeholder="Write a message or note"
               rows="3"
             />
           </div>
@@ -320,13 +303,18 @@ export default function PrincipalForms() {
           {/* Submit/Update Button */}
           <button
             type="submit"
+            disabled={loading}
             className={`w-full py-2 text-white text-sm font-medium rounded ${
               existing
                 ? "bg-blue-950 hover:bg-blue-800"
                 : "bg-blue-950 hover:bg-blue-800"
             }`}
           >
-            {existing ? "তথ্য আপডেট করুন" : "তথ্য সংরক্ষণ করুন"}
+            {loading
+              ? "Processing..."
+              : existing
+              ? "Update Information"
+              : "Save Information"}
           </button>
         </form>
       </div>
@@ -337,7 +325,7 @@ export default function PrincipalForms() {
     <div className="max-w-5xl mx-auto p-4">
       <Toaster position="top-center" />
       <h2 className="text-xl font-semibold text-blue-800 mb-6 text-center">
-        প্রতিষ্ঠান প্রধানদের তথ্য সংরক্ষণ
+        Save School Head Information
       </h2>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

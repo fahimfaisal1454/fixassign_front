@@ -1,12 +1,13 @@
 // src/pages/Admin/StudentInfo.jsx
-import { useEffect, useMemo, useState } from "react";
-import axiosInstance from "../../../components/AxiosInstance" // <-- fixed path
+import { useEffect, useMemo, useRef, useState } from "react";
+import axiosInstance from "../../../components/AxiosInstance";
 import Select from "react-select";
 import { Toaster, toast } from "react-hot-toast";
 
+/* --------------------- Small helpers --------------------- */
 const required = (v) => v !== null && v !== undefined && String(v).trim() !== "";
 
-// keep react-select menus above sticky table/header/overflows
+// react-select menu portal (to avoid z-index issues with sticky headers/modals)
 const menuPortalTarget = typeof document !== "undefined" ? document.body : null;
 
 function AvatarCircle({ name, src, size = 36 }) {
@@ -36,16 +37,19 @@ function AvatarCircle({ name, src, size = 36 }) {
   );
 }
 
+// username suggestion from name
 function slugifyName(name) {
-  return String(name || "")
+  const base = String(name || "")
     .toLowerCase()
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]+/g, "")
-    .slice(0, 24);
+    .slice(0, 20);
+  const rand3 = () => Math.floor(100 + Math.random() * 900);
+  return base ? `${base}${rand3()}` : `user${rand3()}`;
 }
 
-// absolute URL helper for media paths
+// absolute URL helper for photos
 const absUrl = (url) => {
   if (!url) return null;
   const isAbs = /^https?:\/\//i.test(url);
@@ -53,27 +57,28 @@ const absUrl = (url) => {
   return isAbs ? url : `${base}${url.startsWith("/") ? "" : "/"}${url}`;
 };
 
+/* --------------------- Component --------------------- */
 export default function StudentInfo() {
-  // data
+  /* Data */
   const [students, setStudents] = useState([]);
-  const [classes, setClasses] = useState([]); // [{id,name,year,sections:[{id,name}]}]
+  const [classes, setClasses] = useState([]); // [{id,name,year,sections:[{id,name}] | [ids]}]
   const [classToSections, setClassToSections] = useState({});
-  const [sectionsDict, setSectionsDict] = useState({});
+  const [sectionsDict, setSectionsDict] = useState({}); // id->name for loose mapping
 
-  // ui
+  /* UI */
   const [loading, setLoading] = useState(true);
   const [tableBusy, setTableBusy] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // filters
+  /* Filters */
   const [searchTerm, setSearchTerm] = useState("");
   const [filterYear, setFilterYear] = useState(null);
   const [filterClassId, setFilterClassId] = useState(null);
   const [filterSectionId, setFilterSectionId] = useState(null);
 
-  // form
+  /* Form */
   const [form, setForm] = useState({
     full_name: "",
     roll_number: "",
@@ -91,7 +96,7 @@ export default function StudentInfo() {
   const [preview, setPreview] = useState(null);
   const [touched, setTouched] = useState({});
 
-  // user form
+  /* Inline user create/update */
   const [createLogin, setCreateLogin] = useState(false);
   const [userForm, setUserForm] = useState({
     username: "",
@@ -102,25 +107,31 @@ export default function StudentInfo() {
     must_change_password: true,
   });
   const [userEditedUsername, setUserEditedUsername] = useState(false);
-  const [usernameAvailable, setUsernameAvailable] = useState(null);
+
+  // username check state
   const [checkingUsername, setCheckingUsername] = useState(false);
+  const [usernameAvailable, setUsernameAvailable] = useState(null); // true/false/null
   const [usernameNote, setUsernameNote] = useState("");
 
-  // pagination
+  // email/phone live availability (for student record + user account)
+  const emailTimerRef = useRef(null);
+  const phoneTimerRef = useRef(null);
+  const emailSeq = useRef(0);
+  const phoneSeq = useRef(0);
+  const [emailState, setEmailState] = useState({ status: "idle", message: "" }); // idle|checking|ok|taken
+  const [phoneState, setPhoneState] = useState({ status: "idle", message: "" });
+
+  /* Pagination */
   const [page, setPage] = useState(1);
   const pageSize = 12;
 
-  // ---- helpers for classes/years ----
+  /* ---------- Derived ---------- */
   const years = useMemo(() => {
     const set = new Set();
     classes.forEach((c) => c.year && set.add(Number(c.year)));
     return Array.from(set).sort((a, b) => b - a);
   }, [classes]);
-
-  const yearOptions = useMemo(
-    () => years.map((y) => ({ value: y, label: String(y) })),
-    [years]
-  );
+  const yearOptions = useMemo(() => years.map((y) => ({ value: y, label: String(y) })), [years]);
 
   const classesById = useMemo(() => {
     const m = {};
@@ -149,54 +160,46 @@ export default function StudentInfo() {
 
   const sectionNameById = useMemo(() => {
     const m = {};
-    Object.values(classToSections).forEach((arr) =>
-      arr.forEach((s) => (m[s.id] = s.name))
-    );
-    for (const [id, name] of Object.entries(sectionsDict)) {
-      if (!m[id]) m[id] = name;
-    }
+    Object.values(classToSections).forEach((arr) => arr.forEach((s) => (m[s.id] = s.name)));
+    for (const [id, name] of Object.entries(sectionsDict)) if (!m[id]) m[id] = name;
     return m;
   }, [classToSections, sectionsDict]);
 
-  // initial load
+  /* ---------- Load ---------- */
   useEffect(() => {
     (async () => {
       try {
         setLoading(true);
-
-        // Use existing endpoints from the rest of the app:
-        // - students/
-        // - class-names/ (includes embedded sections)
         const [studentsRes, classesRes] = await Promise.all([
           axiosInstance.get("students/"),
-          axiosInstance.get("class-names/"), // <-- was "classes/"
+          axiosInstance.get("class-names/"),
         ]);
 
-        // normalize students + absolute photo
-        const studentsList = (Array.isArray(studentsRes.data) ? studentsRes.data : studentsRes.data?.results || [])
-          .map((s) => ({ ...s, photo: absUrl(s.photo) }));
+        const studentsList = (Array.isArray(studentsRes.data)
+          ? studentsRes.data
+          : studentsRes.data?.results || []
+        ).map((s) => ({ ...s, photo: absUrl(s.photo) }));
 
         const clsRaw = Array.isArray(classesRes.data)
           ? classesRes.data
           : classesRes.data?.results || [];
 
-        // if sections are objects -> use directly; if ids -> name via /sections/
+        // If classes.sections is array of ids, build id->name map
         let sectionsMap = {};
-        const anyIds =
+        const containsSectionIds =
           clsRaw.some(
             (c) =>
               Array.isArray(c.sections) &&
               c.sections.length &&
               typeof c.sections[0] !== "object"
           ) && clsRaw.length;
-
-        if (anyIds) {
+        if (containsSectionIds) {
           try {
             const secRes = await axiosInstance.get("sections/");
             const arr = Array.isArray(secRes.data) ? secRes.data : secRes.data?.results || [];
             sectionsMap = Object.fromEntries(arr.map((s) => [String(s.id), s.name]));
           } catch {
-            // ignore
+            /* ignore */
           }
         }
 
@@ -204,10 +207,12 @@ export default function StudentInfo() {
         clsRaw.forEach((c) => {
           const secs =
             Array.isArray(c.sections) && c.sections.length
-              ? (typeof c.sections[0] === "object"
-                  ? c.sections.map((s) => ({ id: s.id, name: s.name }))
-                  : c.sections.map((id) => ({ id, name: sectionsMap[String(id)] || `#${id}` }))
-                )
+              ? typeof c.sections[0] === "object"
+                ? c.sections.map((s) => ({ id: s.id, name: s.name }))
+                : c.sections.map((id) => ({
+                    id,
+                    name: sectionsMap[String(id)] || `#${id}`,
+                  }))
               : Array.isArray(c.sections_detail)
               ? c.sections_detail.map((s) => ({ id: s.id, name: s.name }))
               : [];
@@ -227,23 +232,18 @@ export default function StudentInfo() {
     })();
   }, []);
 
-  // derived list for table (year → class → section)
+  /* ---------- Filtering ---------- */
   const filtered = useMemo(() => {
-    let out = Array.isArray(students) ? [...students] : [];
-
+    let out = [...students];
     if (searchTerm.trim()) {
       const needle = searchTerm.trim().toLowerCase();
       out = out.filter((s) => String(s.full_name || "").toLowerCase().includes(needle));
     }
-
     if (filterYear) {
-      out = out.filter(
-        (s) => Number(classesById[s.class_name]?.year) === Number(filterYear)
-      );
+      out = out.filter((s) => Number(classesById[s.class_name]?.year) === Number(filterYear));
     }
     if (filterClassId) out = out.filter((s) => Number(s.class_name) === Number(filterClassId));
     if (filterSectionId) out = out.filter((s) => Number(s.section) === Number(filterSectionId));
-
     return out;
   }, [students, searchTerm, filterYear, filterClassId, filterSectionId, classesById]);
 
@@ -251,10 +251,9 @@ export default function StudentInfo() {
   const pageRows = useMemo(() => {
     const start = (page - 1) * pageSize;
     return filtered.slice(start, start + pageSize);
-    // eslint-disable-next-line
   }, [filtered, page]);
 
-  // helpers
+  /* ---------- Refresh ---------- */
   const refreshStudents = async () => {
     setTableBusy(true);
     try {
@@ -271,8 +270,8 @@ export default function StudentInfo() {
     }
   };
 
+  /* ---------- Open/Create/Edit ---------- */
   const resetUsernameState = () => {
-    setUserEditedUsername(false);
     setUsernameAvailable(null);
     setCheckingUsername(false);
     setUsernameNote("");
@@ -294,6 +293,9 @@ export default function StudentInfo() {
       photo: null,
       user: null,
     });
+    setPreview(null);
+    setTouched({});
+    setCreateLogin(false);
     setUserForm({
       username: "",
       email: "",
@@ -302,10 +304,10 @@ export default function StudentInfo() {
       is_active: true,
       must_change_password: true,
     });
+    setUserEditedUsername(false);
     resetUsernameState();
-    setCreateLogin(false);
-    setPreview(null);
-    setTouched({});
+    setEmailState({ status: "idle", message: "" });
+    setPhoneState({ status: "idle", message: "" });
     setModalOpen(true);
   };
 
@@ -326,20 +328,35 @@ export default function StudentInfo() {
       user: s.user || null,
     });
     setPreview(absUrl(s.photo) || null);
+    setTouched({});
     setCreateLogin(Boolean(s.user));
     setUserForm({
-      username: (s.username || s.full_name || "").toLowerCase().replace(/\s+/g, ""),
+      username: "",
       email: s.contact_email || "",
       phone: s.contact_phone || "",
       password: "",
       is_active: true,
       must_change_password: true,
     });
+    setUserEditedUsername(false);
     resetUsernameState();
-    setTouched({});
+    setEmailState({ status: "idle", message: "" });
+    setPhoneState({ status: "idle", message: "" });
     setModalOpen(true);
   };
 
+  const onDelete = async (id) => {
+    if (!window.confirm("Delete this student?")) return;
+    try {
+      await axiosInstance.delete(`students/${id}/`);
+      toast.success("Student deleted.");
+      await refreshStudents();
+    } catch {
+      toast.error("Delete failed.");
+    }
+  };
+
+  /* ---------- Form events ---------- */
   const onChangeField = (e) => {
     const { name, value, type, files } = e.target;
     if (type === "file") {
@@ -352,23 +369,25 @@ export default function StudentInfo() {
       setPreview(file ? URL.createObjectURL(file) : null);
     } else {
       setForm((f) => ({ ...f, [name]: value }));
+      if (name === "contact_email") scheduleEmailCheck();
+      if (name === "contact_phone") schedulePhoneCheck();
     }
   };
   const onBlur = (key) => setTouched((t) => ({ ...t, [key]: true }));
 
+  // auto-suggest username from full_name if createLogin on and user hasn't typed
   useEffect(() => {
     if (!createLogin) return;
     if (userEditedUsername) return;
     if (!form.full_name) {
       setUserForm((u) => ({ ...u, username: "" }));
-      setUsernameAvailable(null);
-      setUsernameNote("");
+      resetUsernameState();
       return;
     }
-    const suggestion = slugifyName(form.full_name);
-    setUserForm((u) => (u.username === suggestion ? u : { ...u, username: suggestion }));
+    setUserForm((u) => ({ ...u, username: slugifyName(form.full_name) }));
   }, [form.full_name, createLogin, userEditedUsername]);
 
+  // debounce username availability check (if backend endpoint exists)
   useEffect(() => {
     if (!createLogin) return;
     const uname = userForm.username?.trim();
@@ -387,16 +406,13 @@ export default function StudentInfo() {
         if (cancelled) return;
         const available = !!data?.available;
         setUsernameAvailable(available);
-        if (!available) {
-          const serverSug =
+        if (!available && !userEditedUsername) {
+          const sug =
             (data?.suggestion && String(data.suggestion)) ||
-            (data?.suggestions && Array.isArray(data.suggestions) && data.suggestions[0]);
-          if (!userEditedUsername) {
-            setUserForm((u) => ({ ...u, username: serverSug || `${uname}${Math.floor(100 + Math.random() * 900)}` }));
-            setUsernameNote("That username was taken. Suggested a free one.");
-          } else {
-            setUsernameNote("Username is taken. Please pick another.");
-          }
+            (data?.suggestions && Array.isArray(data.suggestions) && data.suggestions[0]) ||
+            slugifyName(uname);
+          setUserForm((u) => ({ ...u, username: sug }));
+          setUsernameNote("That username was taken — suggested a free one.");
         } else {
           setUsernameNote("");
         }
@@ -413,17 +429,94 @@ export default function StudentInfo() {
     };
   }, [userForm.username, createLogin, userEditedUsername]);
 
-  const onDelete = async (id) => {
-    if (!window.confirm("Delete this student?")) return;
+  /* ---------- Uniqueness checks for email/phone (students & users) ---------- */
+  const valueUsedByAnotherStudent = async (field, value, excludeId) => {
+    if (!value) return false;
     try {
-      await axiosInstance.delete(`students/${id}/`);
-      toast.success("Student deleted.");
-      await refreshStudents();
+      const params = field === "email" ? { contact_email: value } : { contact_phone: value };
+      const res = await axiosInstance.get("students/", { params });
+      if (Array.isArray(res.data)) {
+        return res.data.some((s) => {
+          if (excludeId && String(s.id) === String(excludeId)) return false;
+          return field === "email"
+            ? (s.contact_email || "").toLowerCase() === value.toLowerCase()
+            : (s.contact_phone || "").trim() === value.trim();
+        });
+      }
     } catch {
-      toast.error("Delete failed.");
+      return false; // fail-open; backend still enforces
+    }
+    return false;
+  };
+
+  const valueUsedByUser = async (field, value) => {
+    if (!value) return false;
+    try {
+      const params = field === "email" ? { email: value } : { phone: value };
+      const res = await axiosInstance.get("admin/users/", { params });
+      if (Array.isArray(res.data)) {
+        return res.data.some((u) =>
+          field === "email"
+            ? (u.email || "").toLowerCase() === value.toLowerCase()
+            : (u.phone || "").trim() === value.trim()
+        );
+      }
+    } catch {
+      return false; // fail-open
+    }
+    return false;
+  };
+
+  const checkEmailUnique = async () => {
+    const email = (form.contact_email || "").trim();
+    const mySeq = ++emailSeq.current;
+    if (!email) {
+      if (mySeq === emailSeq.current) setEmailState({ status: "idle", message: "" });
+      return true;
+    }
+    if (mySeq === emailSeq.current) setEmailState({ status: "checking", message: "Checking…" });
+    const usedByStudent = await valueUsedByAnotherStudent("email", email, editingId);
+    const usedByAccount = await valueUsedByUser("email", email);
+    if (mySeq !== emailSeq.current) return true; // stale
+    if (usedByStudent || usedByAccount) {
+      setEmailState({ status: "taken", message: "Email is already in use." });
+      return false;
+    } else {
+      setEmailState({ status: "ok", message: "Email is available." });
+      return true;
     }
   };
 
+  const checkPhoneUnique = async () => {
+    const phone = (form.contact_phone || "").trim();
+    const mySeq = ++phoneSeq.current;
+    if (!phone) {
+      if (mySeq === phoneSeq.current) setPhoneState({ status: "idle", message: "" });
+      return true;
+    }
+    if (mySeq === phoneSeq.current) setPhoneState({ status: "checking", message: "Checking…" });
+    const usedByStudent = await valueUsedByAnotherStudent("phone", phone, editingId);
+    const usedByAccount = await valueUsedByUser("phone", phone);
+    if (mySeq !== phoneSeq.current) return true; // stale
+    if (usedByStudent || usedByAccount) {
+      setPhoneState({ status: "taken", message: "Phone number is already in use." });
+      return false;
+    } else {
+      setPhoneState({ status: "ok", message: "Phone number is available." });
+      return true;
+    }
+  };
+
+  const scheduleEmailCheck = () => {
+    if (emailTimerRef.current) clearTimeout(emailTimerRef.current);
+    emailTimerRef.current = setTimeout(() => checkEmailUnique(), 400);
+  };
+  const schedulePhoneCheck = () => {
+    if (phoneTimerRef.current) clearTimeout(phoneTimerRef.current);
+    phoneTimerRef.current = setTimeout(() => checkPhoneUnique(), 400);
+  };
+
+  /* ---------- Submit ---------- */
   const onSubmit = async (e) => {
     e.preventDefault();
     setSubmitting(true);
@@ -442,6 +535,14 @@ export default function StudentInfo() {
         section: true,
       }));
       toast.error("Please fill Name, Roll, Class and Section.");
+      setSubmitting(false);
+      return;
+    }
+
+    // Ensure latest email/phone uniqueness result
+    const [emailOK, phoneOK] = await Promise.all([checkEmailUnique(), checkPhoneUnique()]);
+    if (!emailOK || !phoneOK) {
+      toast.error("Fix duplicate email/phone before saving.");
       setSubmitting(false);
       return;
     }
@@ -481,26 +582,30 @@ export default function StudentInfo() {
           setSubmitting(false);
           return;
         }
+
         if (savedUserId) {
+          // update existing account
           const patchPayload = {
             username: userForm.username,
-            email: userForm.email,
-            phone: userForm.phone,
-            is_active: userForm.is_active,
-            must_change_password: userForm.must_change_password,
+            email: userForm.email || form.contact_email || "",
+            phone: userForm.phone || form.contact_phone || "",
+            is_active: !!userForm.is_active,
+            must_change_password: !!userForm.must_change_password,
           };
           if (userForm.password) patchPayload.password = userForm.password;
           await axiosInstance.patch(`admin/users/${savedUserId}/`, patchPayload);
         } else {
+          // create new account, then link
           const payload = {
             username: userForm.username,
-            email: userForm.email,
-            phone: userForm.phone,
+            email: userForm.email || form.contact_email || "",
+            phone: userForm.phone || form.contact_phone || "",
             role: "Student",
-            is_active: userForm.is_active,
-            must_change_password: userForm.must_change_password,
+            is_active: !!userForm.is_active,
+            must_change_password: !!userForm.must_change_password,
           };
           if (userForm.password) payload.password = userForm.password;
+
           const ures = await axiosInstance.post("admin/users/", payload);
           const newUserId = ures?.data?.id;
           await axiosInstance.post(`students/${savedStudentId}/link-user/`, { user_id: newUserId });
@@ -514,13 +619,16 @@ export default function StudentInfo() {
       console.error(err);
       const detail =
         err?.response?.data?.detail ||
-        (typeof err?.response?.data === "object" ? JSON.stringify(err.response.data) : "Save failed.");
+        (typeof err?.response?.data === "object"
+          ? JSON.stringify(err.response.data)
+          : "Save failed.");
       toast.error(detail);
     } finally {
       setSubmitting(false);
     }
   };
 
+  /* ---------- UI ---------- */
   return (
     <div className="p-4 md:p-6">
       <Toaster position="top-center" />
@@ -529,7 +637,9 @@ export default function StudentInfo() {
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Students</h1>
-          <p className="text-sm text-slate-500">Manage student records. Class &amp; Section are required.</p>
+          <p className="text-sm text-slate-500">
+            Manage student records. Class &amp; Section are required.
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -552,7 +662,9 @@ export default function StudentInfo() {
       {/* Filters */}
       <div className="bg-white border rounded-2xl p-3 mb-4 grid grid-cols-1 md:grid-cols-5 gap-3">
         <div className="md:col-span-2">
-          <label className="block text-xs font-medium text-slate-600 mb-1">Search by name</label>
+          <label className="block text-xs font-medium text-slate-600 mb-1">
+            Search by name
+          </label>
           <input
             className="w-full border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 p-2 rounded-lg"
             placeholder="Type a name…"
@@ -623,7 +735,10 @@ export default function StudentInfo() {
             isClearable
             placeholder={filterClassId ? "All sections" : "Pick class first"}
             isDisabled={!filterClassId}
-            value={filterSectionOptions.find((o) => Number(o.value) === Number(filterSectionId)) || null}
+            value={
+              filterSectionOptions.find((o) => Number(o.value) === Number(filterSectionId)) ||
+              null
+            }
             onChange={(opt) => {
               setFilterSectionId(opt ? Number(opt.value) : null);
               setPage(1);
@@ -657,23 +772,34 @@ export default function StudentInfo() {
             {loading ? (
               Array.from({ length: 6 }).map((_, i) => (
                 <tr key={i} className="animate-pulse">
-                  <td className="p-3"><div className="h-3 w-6 bg-slate-200 rounded" /></td>
+                  <td className="p-3">
+                    <div className="h-3 w-6 bg-slate-200 rounded" />
+                  </td>
                   <td className="p-3">
                     <div className="flex items-center gap-3">
                       <div className="h-9 w-9 rounded-full bg-slate-200" />
                       <div className="h-3 w-32 bg-slate-200 rounded" />
                     </div>
                   </td>
-                  <td className="p-3"><div className="h-3 w-12 bg-slate-200 rounded" /></td>
-                  <td className="p-3"><div className="h-5 w-20 bg-slate-200 rounded" /></td>
-                  <td className="p-3"><div className="h-5 w-20 bg-slate-200 rounded" /></td>
-                  <td className="p-3"><div className="h-8 w-28 bg-slate-200 rounded" /></td>
+                  <td className="p-3">
+                    <div className="h-3 w-12 bg-slate-200 rounded" />
+                  </td>
+                  <td className="p-3">
+                    <div className="h-5 w-20 bg-slate-200 rounded" />
+                  </td>
+                  <td className="p-3">
+                    <div className="h-5 w-20 bg-slate-200 rounded" />
+                  </td>
+                  <td className="p-3">
+                    <div className="h-8 w-28 bg-slate-200 rounded" />
+                  </td>
                 </tr>
               ))
             ) : filtered.length === 0 ? (
               <tr>
                 <td colSpan={6} className="py-10 text-center text-slate-500">
-                  No students found. Click <span className="font-medium">“Add Student”</span> to create one.
+                  No students found. Click <span className="font-medium">“Add Student”</span> to
+                  create one.
                 </td>
               </tr>
             ) : (
@@ -734,7 +860,9 @@ export default function StudentInfo() {
             <button
               key={p}
               onClick={() => setPage(p)}
-              className={`px-3 py-1.5 border rounded-lg ${page === p ? "bg-blue-600 text-white" : ""}`}
+              className={`px-3 py-1.5 border rounded-lg ${
+                page === p ? "bg-blue-600 text-white" : ""
+              }`}
             >
               {p}
             </button>
@@ -859,7 +987,8 @@ export default function StudentInfo() {
                   <Select
                     options={sectionOptionsForForm}
                     value={
-                      sectionOptionsForForm.find((o) => Number(o.value) === Number(form.section)) || null
+                      sectionOptionsForForm.find((o) => Number(o.value) === Number(form.section)) ||
+                      null
                     }
                     onChange={(opt) => {
                       setForm((f) => ({ ...f, section: opt ? Number(opt.value) : null }));
@@ -931,9 +1060,24 @@ export default function StudentInfo() {
                     name="contact_email"
                     value={form.contact_email}
                     onChange={onChangeField}
+                    onBlur={checkEmailUnique}
                     className="w-full border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 p-2 rounded-lg"
                     placeholder="name@example.com"
                   />
+                  {emailState.status !== "idle" && (
+                    <p
+                      className={
+                        "text-[11px] mt-1 " +
+                        (emailState.status === "ok"
+                          ? "text-emerald-600"
+                          : emailState.status === "taken"
+                          ? "text-rose-600"
+                          : "text-slate-500")
+                      }
+                    >
+                      {emailState.message}
+                    </p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-slate-600 mb-1">Phone</label>
@@ -941,9 +1085,24 @@ export default function StudentInfo() {
                     name="contact_phone"
                     value={form.contact_phone}
                     onChange={onChangeField}
+                    onBlur={checkPhoneUnique}
                     className="w-full border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 p-2 rounded-lg"
                     placeholder="01XXXXXXXXX"
                   />
+                  {phoneState.status !== "idle" && (
+                    <p
+                      className={
+                        "text-[11px] mt-1 " +
+                        (phoneState.status === "ok"
+                          ? "text-emerald-600"
+                          : phoneState.status === "taken"
+                          ? "text-rose-600"
+                          : "text-slate-500")
+                      }
+                    >
+                      {phoneState.message}
+                    </p>
+                  )}
                 </div>
 
                 {/* Address */}
@@ -972,7 +1131,11 @@ export default function StudentInfo() {
                     />
                     {preview && (
                       <div className="flex items-center gap-3">
-                        <img src={preview} alt="Preview" className="h-16 w-16 rounded-lg object-cover border" />
+                        <img
+                          src={preview}
+                          alt="Preview"
+                          className="h-16 w-16 rounded-lg object-cover border"
+                        />
                         <button
                           type="button"
                           onClick={() => {
@@ -998,7 +1161,9 @@ export default function StudentInfo() {
                     checked={createLogin}
                     onChange={(e) => setCreateLogin(e.target.checked)}
                   />
-                  <span className="text-sm font-medium">Create / update login for this student</span>
+                  <span className="text-sm font-medium">
+                    Create / update login for this student
+                  </span>
                 </label>
 
                 {createLogin && (
@@ -1034,7 +1199,7 @@ export default function StudentInfo() {
                       <label className="block text-xs font-medium text-slate-600 mb-1">Email</label>
                       <input
                         type="email"
-                        value={userForm.email}
+                        value={userForm.email || form.contact_email}
                         onChange={(e) => setUserForm((u) => ({ ...u, email: e.target.value }))}
                         className="w-full border p-2 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
                         placeholder="name@example.com"
@@ -1043,7 +1208,7 @@ export default function StudentInfo() {
                     <div>
                       <label className="block text-xs font-medium text-slate-600 mb-1">Phone</label>
                       <input
-                        value={userForm.phone}
+                        value={userForm.phone || form.contact_phone}
                         onChange={(e) => setUserForm((u) => ({ ...u, phone: e.target.value }))}
                         className="w-full border p-2 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
                         placeholder="01XXXXXXXXX"
@@ -1066,7 +1231,9 @@ export default function StudentInfo() {
                         <input
                           type="checkbox"
                           checked={userForm.is_active}
-                          onChange={(e) => setUserForm((u) => ({ ...u, is_active: e.target.checked }))}
+                          onChange={(e) =>
+                            setUserForm((u) => ({ ...u, is_active: e.target.checked }))
+                          }
                         />
                         <span className="text-sm">Active</span>
                       </label>
@@ -1075,7 +1242,10 @@ export default function StudentInfo() {
                           type="checkbox"
                           checked={userForm.must_change_password}
                           onChange={(e) =>
-                            setUserForm((u) => ({ ...u, must_change_password: e.target.checked }))
+                            setUserForm((u) => ({
+                              ...u,
+                              must_change_password: e.target.checked,
+                            }))
                           }
                         />
                         <span className="text-sm">Must change password on first login</span>
@@ -1086,8 +1256,19 @@ export default function StudentInfo() {
 
                 <button
                   type="submit"
-                  disabled={submitting}
-                  className="w-full mt-2 bg-blue-600 text-white py-2.5 rounded-xl font-semibold hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 md:col-span-2"
+                  disabled={
+                    submitting ||
+                    emailState.status === "taken" ||
+                    phoneState.status === "taken" ||
+                    emailState.status === "checking" ||
+                    phoneState.status === "checking"
+                  }
+                  className="w-full mt-2 bg-blue-600 text-white py-2.5 rounded-xl font-semibold hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 md:col-span-2 disabled:opacity-50"
+                  title={
+                    emailState.status === "taken" || phoneState.status === "taken"
+                      ? "Resolve duplicate email/phone"
+                      : ""
+                  }
                 >
                   {submitting ? "Saving..." : editingId ? "Update" : "Save"}
                 </button>

@@ -4,23 +4,27 @@ import AxiosInstance from "../../../components/AxiosInstance";
 import { toast } from "react-hot-toast";
 
 export default function AdminMarksViewer() {
-  const [classes, setClasses] = useState([]);
-  const [sections, setSections] = useState([]);
-  const [exams, setExams] = useState([]);
+  /* --------------------- Year / Class / Section --------------------- */
+  const [years, setYears] = useState([]);   // [2025, 2024, ...]
+  const [classes, setClasses] = useState([]); // array of class objects for selected year
+  const [sections, setSections] = useState([]); // array of section objects for selected class
 
-  const [classId, setClassId] = useState("");
-  const [sectionId, setSectionId] = useState("");
+  const [year, setYear] = useState("");       // string/number
+  const [classId, setClassId] = useState(""); // selected class id
+  const [sectionId, setSectionId] = useState(""); // selected section id
+
+  /* --------------------- Exams & marks --------------------- */
+  const [exams, setExams] = useState([]);
   const [examId, setExamId] = useState("");
 
-  // all marks for the chosen exam
   const [marks, setMarks] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  // subject -> teacher (for the chosen class/section)
+  // subject -> teacher (for class/section)
   // shape: { [subjectId]: { id, name, teacher_name } }
   const [subjectTeachers, setSubjectTeachers] = useState({});
 
-  // NEW: class/section roster map: { [studentId]: { roll, name? } }
+  // class/section roster map: { [studentId]: { roll, name? } }
   const [roster, setRoster] = useState({});
 
   // student detail panel
@@ -34,24 +38,69 @@ export default function AdminMarksViewer() {
   // keep mark ids for quick PATCH (subject_id -> markId)
   const [studentMarkIds, setStudentMarkIds] = useState({}); // { [subject_id]: markId|undefined }
 
-  // ── Load classes
+  /* --------------------- Fetch years (like ExamsAdmin) --------------------- */
   useEffect(() => {
     (async () => {
       try {
-        const { data } = await AxiosInstance.get("class-names/");
-        setClasses(Array.isArray(data) ? data : []);
+        const res = await AxiosInstance.get("classes/years/");
+        const serverYears = Array.isArray(res.data) ? res.data : [];
+        setYears(serverYears);
+        if (serverYears.length) {
+          const latest = serverYears
+            .slice()
+            .sort((a, b) => Number(b) - Number(a))[0];
+          setYear(String(latest));
+        }
       } catch {
-        toast.error("Failed to load classes.");
+        toast.error("Failed to load years");
+        setYears([]);
       }
     })();
   }, []);
 
-  // ── Sections when class changes
+  /* --------------------- Fetch classes for selected year --------------------- */
+  useEffect(() => {
+    if (!year) {
+      setClasses([]);
+      setSections([]);
+      setClassId("");
+      setSectionId("");
+      setExamId("");
+      setExams([]);
+      setMarks([]);
+      setSelectedStudentId(null);
+      setStudentInfo(null);
+      setStudentRows([]);
+      setSubjectTeachers({});
+      setRoster({});
+      setEditedMarks({});
+      setStudentMarkIds({});
+      return;
+    }
+    (async () => {
+      try {
+        const { data } = await AxiosInstance.get("classes/", { params: { year } });
+        const list = Array.isArray(data) ? data : data?.results || [];
+        setClasses(list);
+      } catch {
+        toast.error("Failed to load classes");
+        setClasses([]);
+      }
+    })();
+  }, [year]);
+
+  /* --------------------- Sections come from selected class --------------------- */
   useEffect(() => {
     const cls = classes.find((c) => String(c.id) === String(classId));
-    setSections(cls?.sections || []);
+    const secs = (cls?.sections_detail || cls?.sections || []).map((s) => ({
+      id: s.id,
+      name: s.name,
+    }));
+    setSections(secs);
     setSectionId("");
     setExamId("");
+
+    // clear downstream data
     setMarks([]);
     setSelectedStudentId(null);
     setStudentInfo(null);
@@ -62,34 +111,33 @@ export default function AdminMarksViewer() {
     setStudentMarkIds({});
   }, [classId, classes]);
 
-  // ── Exams for class+section
+  /* --------------------- Load exams (year + class + section) --------------------- */
   useEffect(() => {
     (async () => {
-      if (!classId || !sectionId) {
+      if (!year || !classId || !sectionId) {
         setExams([]);
         return;
       }
       try {
         const { data } = await AxiosInstance.get("exams/", {
-          params: { class_name: classId, section: sectionId },
+          params: { year, class_name: Number(classId), section: Number(sectionId) },
         });
         setExams(Array.isArray(data) ? data : []);
       } catch {
         setExams([]);
       }
     })();
-  }, [classId, sectionId]);
+  }, [year, classId, sectionId]);
 
-  // ── Load subject→teacher map for class+section
+  /* --------------------- Subject→Teacher map (timetable/ then subjects/) --------------------- */
   useEffect(() => {
     (async () => {
       setSubjectTeachers({});
-      if (!classId || !sectionId) return;
+      if (!year || !classId || !sectionId) return;
 
-      // 1) timetable/ (preferred)
       const buildFromTimetable = async () => {
         const { data } = await AxiosInstance.get("timetable/", {
-          params: { class_name: classId, section: sectionId },
+          params: { year, class_name: Number(classId), section: Number(sectionId) },
         });
         const rows = Array.isArray(data) ? data : [];
         const map = {};
@@ -107,10 +155,9 @@ export default function AdminMarksViewer() {
         return map;
       };
 
-      // 2) subjects/ (fallback, no teacher info)
       const buildFromSubjectsOnly = async () => {
         const { data } = await AxiosInstance.get("subjects/", {
-          params: { class_id: classId },
+          params: { year, class_id: Number(classId) },
         });
         const arr = Array.isArray(data) ? data : [];
         const map = {};
@@ -134,16 +181,16 @@ export default function AdminMarksViewer() {
         setSubjectTeachers({});
       }
     })();
-  }, [classId, sectionId]);
+  }, [year, classId, sectionId]);
 
-  // ── Load roster (roll numbers) for class+section
+  /* --------------------- Roster (year + class + section) --------------------- */
   useEffect(() => {
     (async () => {
       setRoster({});
-      if (!classId || !sectionId) return;
+      if (!year || !classId || !sectionId) return;
       try {
         const { data } = await AxiosInstance.get("students/", {
-          params: { class_id: classId, section_id: sectionId },
+          params: { year, class_id: Number(classId), section_id: Number(sectionId) },
         });
         const list = Array.isArray(data) ? data : (data?.results || []);
         const map = {};
@@ -158,12 +205,12 @@ export default function AdminMarksViewer() {
         }
         setRoster(map);
       } catch {
-        // if roster fails, we still fall back to marks-provided roll/name
+        // okay to fail; will still show names/rolls from marks if present
       }
     })();
-  }, [classId, sectionId]);
+  }, [year, classId, sectionId]);
 
-  // ── Load all marks for the chosen exam
+  /* --------------------- Load all marks for chosen exam --------------------- */
   useEffect(() => {
     (async () => {
       setSelectedStudentId(null);
@@ -176,7 +223,7 @@ export default function AdminMarksViewer() {
       setLoading(true);
       try {
         const { data } = await AxiosInstance.get("exam-marks/", {
-          params: { exam: examId },
+          params: { exam: Number(examId) },
         });
         setMarks(Array.isArray(data) ? data : []);
       } catch {
@@ -188,7 +235,7 @@ export default function AdminMarksViewer() {
     })();
   }, [examId]);
 
-  // ── Build unique student list from marks, merge roster roll/name
+  /* --------------------- Build unique students list --------------------- */
   const students = useMemo(() => {
     const map = new Map();
     for (const m of marks) {
@@ -213,7 +260,7 @@ export default function AdminMarksViewer() {
           "—",
       });
     }
-    // If marks were empty but roster has students, show roster anyway
+    // If marks empty but roster has students, show roster instead
     if (map.size === 0) {
       Object.entries(roster).forEach(([idStr, info]) => {
         const id = Number(idStr);
@@ -229,13 +276,12 @@ export default function AdminMarksViewer() {
     );
   }, [marks, roster]);
 
-  // ── On student click: merge full subject list with that student's marks
+  /* --------------------- Open student detail --------------------- */
   const openStudent = async (stu) => {
     if (!examId) {
       toast.error("Pick an exam first.");
       return;
     }
-    // Prefer roster data for roll/name if present
     const rosterEntry = roster[Number(stu.id)];
     const mergedStu = {
       ...stu,
@@ -251,13 +297,11 @@ export default function AdminMarksViewer() {
     setLoadingDetails(true);
 
     try {
-      // fetch this student's marks for selected exam
       const { data } = await AxiosInstance.get("exam-marks/", {
-        params: { exam: examId, student: mergedStu.id },
+        params: { exam: Number(examId), student: Number(mergedStu.id) },
       });
       const arr = Array.isArray(data) ? data : [];
 
-      // map marks by subject id string
       const markBySubject = new Map();
       const idBySubject = {};
       for (const m of arr) {
@@ -276,7 +320,6 @@ export default function AdminMarksViewer() {
         });
       }
 
-      // union of subjects: from subjectTeachers and from marks
       const allSubjectIds = new Set([
         ...Object.keys(subjectTeachers),
         ...Array.from(markBySubject.keys()),
@@ -287,7 +330,7 @@ export default function AdminMarksViewer() {
         const meta = subjectTeachers[sid] || {};
         return {
           subject_id: sid,
-          mark_id: mark?.id, // keep id for PATCH
+          mark_id: mark?.id,
           subject_name: mark?.subject_name || meta.name || sid,
           teacher_name: mark?.teacher_name || meta.teacher_name || "—",
           score: mark?.score ?? "—",
@@ -300,7 +343,6 @@ export default function AdminMarksViewer() {
       setStudentRows(rows);
       setStudentMarkIds(idBySubject);
 
-      // initialize editable values with current scores
       const init = {};
       for (const r of rows) {
         init[r.subject_id] = r.score === "—" ? "" : String(r.score);
@@ -316,7 +358,7 @@ export default function AdminMarksViewer() {
     }
   };
 
-  // ── Publish exam
+  /* --------------------- Publish exam --------------------- */
   const publishExam = async () => {
     if (!examId) return;
     try {
@@ -330,11 +372,10 @@ export default function AdminMarksViewer() {
     }
   };
 
-  // Save edits for the currently selected student
+  /* --------------------- Save edits --------------------- */
   const saveStudentEdits = async () => {
     if (!selectedStudentId || !examId) return;
-    const entries = Object.entries(editedMarks)
-      .filter(([_, v]) => v !== "" && v != null);
+    const entries = Object.entries(editedMarks).filter(([_, v]) => v !== "" && v != null);
 
     if (!entries.length) {
       toast("Nothing to save.");
@@ -347,7 +388,10 @@ export default function AdminMarksViewer() {
     for (const [subjectIdStr, val] of entries) {
       const subjectId = Number(subjectIdStr);
       const scoreNum = Number(val);
-      if (Number.isNaN(scoreNum)) { fail++; continue; }
+      if (Number.isNaN(scoreNum)) {
+        fail++;
+        continue;
+      }
 
       const markId = studentMarkIds[subjectIdStr];
       const payload = {
@@ -361,15 +405,13 @@ export default function AdminMarksViewer() {
         if (markId) {
           await AxiosInstance.patch(`exam-marks/${markId}/`, { score: scoreNum });
         } else {
-          // create if missing
           await AxiosInstance.post("exam-marks/", payload);
         }
         ok++;
       } catch {
-        // last-chance upsert (lookup then patch)
         try {
           const g = await AxiosInstance.get("exam-marks/", {
-            params: { exam: examId, student: selectedStudentId, subject: subjectId },
+            params: { exam: Number(examId), student: Number(selectedStudentId), subject: subjectId },
           });
           const id = Array.isArray(g.data) ? g.data[0]?.id : g.data?.results?.[0]?.id;
           if (id) {
@@ -388,24 +430,39 @@ export default function AdminMarksViewer() {
     if (fail) toast.error(`Saved ${ok}, failed ${fail}.`);
     else toast.success(`Updated ${ok} marks.`);
 
-    // reload the open student's rows to show fresh values
     if (studentInfo) openStudent({ id: studentInfo.id, roll: studentInfo.roll, name: studentInfo.name });
   };
 
+  /* --------------------- UI --------------------- */
   return (
     <div className="space-y-6">
       <h1 className="text-xl font-bold">Admin Marks Viewer</h1>
 
       {/* Filters */}
-      <div className="grid md:grid-cols-3 gap-3 bg-white border p-4 rounded">
+      <div className="grid md:grid-cols-4 gap-3 bg-white border p-4 rounded">
+        <div>
+          <label className="text-sm font-semibold">Year</label>
+          <select
+            value={year}
+            onChange={(e) => setYear(e.target.value)}
+            className="w-full border rounded px-2 py-1 bg-white"
+          >
+            {!years.length && <option value="">Loading…</option>}
+            {years.map((y) => (
+              <option key={y} value={y}>{y}</option>
+            ))}
+          </select>
+        </div>
+
         <div>
           <label className="text-sm font-semibold">Class</label>
           <select
             value={classId}
             onChange={(e) => setClassId(e.target.value)}
             className="w-full border rounded px-2 py-1 bg-white"
+            disabled={!year}
           >
-            <option value="">Select class…</option>
+            <option value="">{year ? "Select class…" : "Select a year first"}</option>
             {classes.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}
@@ -420,7 +477,7 @@ export default function AdminMarksViewer() {
             value={sectionId}
             onChange={(e) => setSectionId(e.target.value)}
             className="w-full border rounded px-2 py-1 bg-white"
-            disabled={!classId}
+            disabled={!year || !classId}
           >
             <option value="">Select section…</option>
             {sections.map((s) => (
@@ -437,7 +494,7 @@ export default function AdminMarksViewer() {
             value={examId}
             onChange={(e) => setExamId(e.target.value)}
             className="w-full border rounded px-2 py-1 bg-white"
-            disabled={!classId || !sectionId}
+            disabled={!year || !classId || !sectionId}
           >
             <option value="">Select exam…</option>
             {exams.map((ex) => (
@@ -547,7 +604,7 @@ export default function AdminMarksViewer() {
                 <button
                   onClick={saveStudentEdits}
                   className="px-4 py-2 rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
-                  disabled={!Object.values(editedMarks).some(v => v !== "" && v != null)}
+                  disabled={!Object.values(editedMarks).some((v) => v !== "" && v != null)}
                   title="Save changes"
                 >
                   Save Changes

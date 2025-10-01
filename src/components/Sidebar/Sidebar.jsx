@@ -65,11 +65,11 @@ export default function Sidebar() {
   const Divider = () => <div className={`${collapsed ? "mx-2" : "ml-3 mr-2"} h-px bg-white/20 my-2`} />;
 
   return (
-    <aside
-      className={`h-screen bg-[#2C8E3F] text-white flex flex-col ${
-        collapsed ? "w-16" : "w-64"
-      } transition-all duration-300`}
-    >
+ <aside
+  className={`sticky top-0 h-[100dvh] max-h-screen overflow-y-auto bg-[#2C8E3F] text-white flex flex-col ${
+    collapsed ? "w-16" : "w-64"
+  } transition-all duration-300`}
+>
       {/* Top */}
       <div className="relative">
         <div className="flex items-center px-4 py-4">
@@ -185,10 +185,10 @@ export default function Sidebar() {
               <RiTeamFill className="text-lg" />
               {!collapsed && "Users"}
             </NavLink>
-            <NavLink to="/dashboard/link-account" className={navLinkStyle}>
+            {/* <NavLink to="/dashboard/link-account" className={navLinkStyle}>
               <RiTeamFill className="text-lg" />
               {!collapsed && "Link Account"}
-            </NavLink>
+            </NavLink> */}
           </div>
         </div>
 
