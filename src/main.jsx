@@ -66,7 +66,7 @@ import MyStudents from "./pages/Teachers/MyStudents.jsx";
 import TeacherRoutine from "./pages/Teachers/TeacherRoutine.jsx";
 import AttendanceReport from "./pages/Teachers/AttendanceReport";
 import AttendanceSheet from "./pages/Teachers/AttendanceSheet.jsx";
-
+import TeacherAssignments from "./pages/Teachers/Assignments.jsx";
 
 /* === Student Panel imports (new) === */
 import StudentPanel from "./Layout/StudentPanel.jsx";
@@ -75,7 +75,7 @@ import StudentProfile from "./pages/Students/MyProfile.jsx";
 import StudentTimetable from "./pages/Students/MyTimetable.jsx";
 import StudentResults from "./pages/Students/MyResults.jsx";
 import StudentNotices from "./pages/Students/Notices.jsx";
-
+import StudentAssignments from "./pages/Students/Assignments.jsx";
 
 
 
@@ -200,7 +200,7 @@ const router = createBrowserRouter([
       { path: "routine", element: <TeacherRoutine /> },
       { path: "attendance-report", element: <AttendanceReport /> },
       { path: "attendance-sheet", element: <AttendanceSheet /> },
-     
+      { path: "assignments", element: <TeacherAssignments /> },
       
     ],
   },
@@ -219,6 +219,7 @@ const router = createBrowserRouter([
     { path: "timetable", element: <StudentTimetable /> },
     { path: "results", element: <StudentResults /> },
     { path: "notices", element: <StudentNotices /> },
+    { path: "assignments", element: <StudentAssignments /> }
   ],
 },
 ]);
