@@ -58,9 +58,9 @@ export default function StudentSidebar() {
       <div className="flex-grow px-2 overflow-auto space-y-1">
         <NavLink to="/student/dashboard" className={navLinkStyle}><MdDashboard className="text-lg" />{!collapsed && "Dashboard"}</NavLink>
         <NavLink to="/student/profile" className={navLinkStyle}><FaUserAlt className="text-lg" />{!collapsed && "My Profile"}</NavLink>
-        <NavLink to="/student/timetable" className={navLinkStyle}><FaRegCalendarAlt className="text-lg" />{!collapsed && "My Timetable"}</NavLink>
+        <NavLink to="/student/timetable" className={navLinkStyle}><FaRegCalendarAlt className="text-lg" />{!collapsed && "ClassRoutine"}</NavLink>
         <NavLink to="/student/results" className={navLinkStyle}><FaBookOpen className="text-lg" />{!collapsed && "My Results"}</NavLink>
-        <NavLink to="/student/assignments" className={navLinkStyle}><FaBell className="text-lg" />{!collapsed && "Assignments"}</NavLink>
+        <NavLink to="/student/assignments" className={navLinkStyle}><FaBell className="text-lg" />{!collapsed && "Homework"}</NavLink>
         <NavLink to="/student/notices" className={navLinkStyle}><FaBell className="text-lg" />{!collapsed && "Notices"}</NavLink>
       </div>
 

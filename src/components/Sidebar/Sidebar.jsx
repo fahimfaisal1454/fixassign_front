@@ -283,6 +283,10 @@ export default function Sidebar() {
               <MdLibraryBooks className="text-lg" />
               {!collapsed && "View Marks"}
             </NavLink>
+            <NavLink to="/dashboard/admin-report" className={navLinkStyle}>
+              <MdLibraryBooks className="text-lg" />
+              {!collapsed && "Report"}
+            </NavLink>
 
             <Divider />
 

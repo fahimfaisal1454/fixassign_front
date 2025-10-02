@@ -38,6 +38,26 @@ export default function AdminMarksViewer() {
   // keep mark ids for quick PATCH (subject_id -> markId)
   const [studentMarkIds, setStudentMarkIds] = useState({}); // { [subject_id]: markId|undefined }
 
+  // track inline validation (subject_id -> error string | undefined)
+  const [fieldErrors, setFieldErrors] = useState({});     // { [subject_id]: "Score must be 0-100" }
+
+  /* --------------------- Helpers --------------------- */
+  const isValidScore = (val) => {
+    if (val === "" || val === null || val === undefined) return true; // empty is allowed in UI (means don't change)
+    const n = Number(val);
+    return Number.isFinite(n) && n >= 0 && n <= 100;
+  };
+
+  const normalizeOnBlur = (val) => {
+    // Optional “clamp” behavior. If you prefer to reject instead of clamp, remove this.
+    if (val === "" || val == null) return "";
+    let n = Number(val);
+    if (!Number.isFinite(n)) return "";
+    if (n < 0) n = 0;
+    if (n > 100) n = 100;
+    return String(n);
+  };
+
   /* --------------------- Fetch years (like ExamsAdmin) --------------------- */
   useEffect(() => {
     (async () => {
@@ -46,9 +66,7 @@ export default function AdminMarksViewer() {
         const serverYears = Array.isArray(res.data) ? res.data : [];
         setYears(serverYears);
         if (serverYears.length) {
-          const latest = serverYears
-            .slice()
-            .sort((a, b) => Number(b) - Number(a))[0];
+          const latest = serverYears.slice().sort((a, b) => Number(b) - Number(a))[0];
           setYear(String(latest));
         }
       } catch {
@@ -75,6 +93,7 @@ export default function AdminMarksViewer() {
       setRoster({});
       setEditedMarks({});
       setStudentMarkIds({});
+      setFieldErrors({});
       return;
     }
     (async () => {
@@ -109,6 +128,7 @@ export default function AdminMarksViewer() {
     setRoster({});
     setEditedMarks({});
     setStudentMarkIds({});
+    setFieldErrors({});
   }, [classId, classes]);
 
   /* --------------------- Load exams (year + class + section) --------------------- */
@@ -218,6 +238,7 @@ export default function AdminMarksViewer() {
       setStudentRows([]);
       setEditedMarks({});
       setStudentMarkIds({});
+      setFieldErrors({});
 
       if (!examId) return setMarks([]);
       setLoading(true);
@@ -294,6 +315,7 @@ export default function AdminMarksViewer() {
     setStudentRows([]);
     setEditedMarks({});
     setStudentMarkIds({});
+    setFieldErrors({});
     setLoadingDetails(true);
 
     try {
@@ -372,7 +394,7 @@ export default function AdminMarksViewer() {
     }
   };
 
-  /* --------------------- Save edits --------------------- */
+  /* --------------------- Save edits (with HARD validation) --------------------- */
   const saveStudentEdits = async () => {
     if (!selectedStudentId || !examId) return;
     const entries = Object.entries(editedMarks).filter(([_, v]) => v !== "" && v != null);
@@ -382,13 +404,28 @@ export default function AdminMarksViewer() {
       return;
     }
 
+    // Validate all first: block save if *any* invalid.
+    let localErrors = {};
+    for (const [subjectIdStr, val] of entries) {
+      if (!isValidScore(val)) {
+        localErrors[subjectIdStr] = "Score must be a number between 0 and 100.";
+      }
+    }
+    setFieldErrors(localErrors);
+    const invalidCount = Object.keys(localErrors).length;
+    if (invalidCount) {
+      toast.error(`Fix ${invalidCount} invalid score${invalidCount > 1 ? "s" : ""} before saving.`);
+      return;
+    }
+
     const btn = toast.loading("Saving changes…");
     let ok = 0, fail = 0;
 
     for (const [subjectIdStr, val] of entries) {
       const subjectId = Number(subjectIdStr);
       const scoreNum = Number(val);
-      if (Number.isNaN(scoreNum)) {
+      // double safety
+      if (!Number.isFinite(scoreNum) || scoreNum < 0 || scoreNum > 100) {
         fail++;
         continue;
       }
@@ -430,6 +467,7 @@ export default function AdminMarksViewer() {
     if (fail) toast.error(`Saved ${ok}, failed ${fail}.`);
     else toast.success(`Updated ${ok} marks.`);
 
+    // Refresh only if we have a student open
     if (studentInfo) openStudent({ id: studentInfo.id, roll: studentInfo.roll, name: studentInfo.name });
   };
 
@@ -572,40 +610,70 @@ export default function AdminMarksViewer() {
                   </tr>
                 </thead>
                 <tbody>
-                  {studentRows.map((r, idx) => (
-                    <tr key={idx} className="border-b">
-                      <td className="px-2 py-1">{r.subject_name}</td>
-                      <td className="px-2 py-1 text-center">
-                        <input
-                          type="number"
-                          min={0}
-                          max={100}
-                          className="w-24 border rounded px-2 py-1 text-center"
-                          value={editedMarks[r.subject_id] ?? ""}
-                          onChange={(e) =>
-                            setEditedMarks((m) => ({
-                              ...m,
-                              [r.subject_id]: e.target.value,
-                            }))
-                          }
-                          placeholder={r.score === "—" ? "—" : String(r.score)}
-                          title="Edit score"
-                        />
-                      </td>
-                      <td className="px-2 py-1 text-center">{r.letter}</td>
-                      <td className="px-2 py-1 text-center">{r.gpa}</td>
-                      <td className="px-2 py-1">{r.teacher_name}</td>
-                    </tr>
-                  ))}
+                  {studentRows.map((r, idx) => {
+                    const val = editedMarks[r.subject_id] ?? "";
+                    const invalid = !isValidScore(val);
+                    return (
+                      <tr key={idx} className="border-b align-top">
+                        <td className="px-2 py-1">{r.subject_name}</td>
+                        <td className="px-2 py-1 text-center">
+                          <input
+                            type="number"
+                            min={0}
+                            max={100}
+                            step="0.01"
+                            className={`w-24 border rounded px-2 py-1 text-center ${
+                              invalid ? "border-red-500 focus:ring-red-200" : ""
+                            }`}
+                            value={val}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              setEditedMarks((m) => ({ ...m, [r.subject_id]: v }));
+                              setFieldErrors((fe) => {
+                                const next = { ...fe };
+                                if (!isValidScore(v)) next[r.subject_id] = "Score must be 0–100.";
+                                else delete next[r.subject_id];
+                                return next;
+                              });
+                            }}
+                            onBlur={(e) => {
+                              const clamped = normalizeOnBlur(e.target.value);
+                              if (clamped !== e.target.value) {
+                                setEditedMarks((m) => ({ ...m, [r.subject_id]: clamped }));
+                                toast("Adjusted to 0–100 range.");
+                              }
+                            }}
+                            placeholder={r.score === "—" ? "—" : String(r.score)}
+                            title="Edit score (0–100)"
+                          />
+                          {fieldErrors[r.subject_id] && (
+                            <div className="text-[11px] mt-1 text-red-600">
+                              {fieldErrors[r.subject_id]}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-2 py-1 text-center">{r.letter}</td>
+                        <td className="px-2 py-1 text-center">{r.gpa}</td>
+                        <td className="px-2 py-1">{r.teacher_name}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
 
-              <div className="p-3 flex justify-end">
+              <div className="p-3 flex justify-end gap-2">
                 <button
                   onClick={saveStudentEdits}
                   className="px-4 py-2 rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
-                  disabled={!Object.values(editedMarks).some((v) => v !== "" && v != null)}
-                  title="Save changes"
+                  disabled={
+                    !Object.values(editedMarks).some((v) => v !== "" && v != null) ||
+                    Object.keys(fieldErrors).length > 0
+                  }
+                  title={
+                    Object.keys(fieldErrors).length > 0
+                      ? "Fix invalid scores before saving"
+                      : "Save changes"
+                  }
                 >
                   Save Changes
                 </button>

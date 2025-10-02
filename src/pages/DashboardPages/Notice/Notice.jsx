@@ -313,6 +313,7 @@ export default function AddNotice() {
                 <option value="government_order">Government Order</option>
                 <option value="executive_order">Executive Order</option>
                 <option value="notification">Notification</option>
+                <option value="teacher">Teacher</option>
               </select>
             </div>
 

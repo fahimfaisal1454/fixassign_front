@@ -46,8 +46,16 @@ export default function CollegeOverview() {
   const teacherCount = Array.isArray(teachers) ? teachers.length : 0;
 
   const usefulLinks = [
-    { name: "Directorate of Secondary & Higher Education", url: "https://www.dshe.gov.bd/", tag: "Official" },
-    { name: "Board of Intermediate & Secondary Education, Jashore", url: "https://www.jessoreboard.gov.bd/", tag: "Board" },
+    {
+      name: "Directorate of Secondary & Higher Education",
+      url: "https://www.dshe.gov.bd/",
+      tag: "Official",
+    },
+    {
+      name: "Board of Intermediate & Secondary Education, Jashore",
+      url: "https://www.jessoreboard.gov.bd/",
+      tag: "Board",
+    },
     { name: "Ministry of Education", url: "https://moedu.gov.bd/", tag: "Gov" },
     { name: "Jessore District Education Office", url: "https://jessore.gov.bd/" },
     { name: "Education Management Information System (EMIS)", url: "https://emis.gov.bd/" },
@@ -58,13 +66,12 @@ export default function CollegeOverview() {
     <div className="bg-[#f1f5f9] py-12 px-4 md:px-10">
       {/* Top Summary Row-by-Row */}
       <div className="max-w-7xl mx-auto grid grid-cols-1 gap-8">
-        
         {/* About College Card */}
         <div className="bg-white/60 backdrop-blur-lg border border-white/20 shadow-xl rounded-2xl p-6 flex flex-col justify-between">
           <div className="text-center mb-4">
             <img
               src={instituteInfo?.logo || clgLogo}
-              alt="Logo"
+              alt="Institution Logo"
               className="h-20 w-20 object-cover rounded-full border-4 border-white shadow mx-auto"
               onError={(e) => {
                 e.currentTarget.src = clgLogo;
@@ -79,9 +86,7 @@ export default function CollegeOverview() {
           </div>
 
           <div>
-            <h3 className="text-sm font-semibold text-[#0A3B68] mb-1">
-              Institution History
-            </h3>
+            <h3 className="text-sm font-semibold text-[#0A3B68] mb-1">Institution History</h3>
             <p className="text-sm text-gray-700 leading-relaxed text-justify">
               {instituteInfo?.history ||
                 "In line with the needs of the times, we nurture students with ethics, creativity, and leadership..."}
@@ -109,21 +114,22 @@ export default function CollegeOverview() {
           <h2 className="text-xl font-bold text-[#0A3B68] mb-4 text-center border-b pb-2">
             College Administration
           </h2>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
             {members.map((member, index) => (
               <div
                 key={index}
-                className="bg-white p-2 rounded-xl text-center shadow hover:shadow-md transition"
+                className="bg-white p-3 rounded-xl text-center shadow hover:shadow-md transition"
               >
+                {/* Passport-size photo: 2x3 ratio */}
                 <img
                   src={member?.photo || defaultImage}
                   alt={member?.full_name || "Member"}
-                  className="w-16 h-16 mx-auto object-cover rounded-full border-2 border-[#0A3B68]"
+                  className="w-24 h-32 mx-auto object-cover object-top rounded-md border-2 border-[#0A3B68] bg-white shadow-sm"
                   onError={(e) => {
                     e.currentTarget.src = defaultImage;
                   }}
                 />
-                <h3 className="text-sm font-semibold text-[#0A3B68] mt-2">
+                <h3 className="text-sm font-semibold text-[#0A3B68] mt-2 leading-tight">
                   {member?.full_name || "—"}
                 </h3>
                 <p className="text-xs text-gray-500">{member?.role || ""}</p>
@@ -139,10 +145,11 @@ export default function CollegeOverview() {
           </h2>
 
           <div className="flex justify-center mb-4">
+            {/* Passport-size photo: 2x3 ratio */}
             <img
               src={principal?.photo || defaultImage}
               alt="Principal"
-              className="w-36 h-36 object-cover rounded-xl border shadow"
+              className="w-24 h-32 object-cover object-top rounded-md border bg-white shadow"
               onError={(e) => {
                 e.currentTarget.src = defaultImage;
               }}
@@ -165,9 +172,6 @@ export default function CollegeOverview() {
           <h2 className="text-2xl md:text-3xl font-extrabold tracking-tight text-[#0A3B68]">
             Useful Websites
           </h2>
-          <p className="mt-2 text-sm md:text-base text-gray-600">
-            Quick access to important links
-          </p>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -191,7 +195,7 @@ export default function CollegeOverview() {
                 rel="noopener noreferrer"
                 className="group relative block rounded-2xl bg-white/80 backdrop-blur-md border border-gray-200 shadow-sm hover:shadow-xl hover:-translate-y-[2px] transition-all duration-300"
               >
-                <span className="pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-br from-[#0A3B68]/10 via-transparent to-yellow-400/20 opacity-0 group-hover:opacity-100 transition-opacity"></span>
+                <span className="pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-br from-[#0A3B68]/10 via-transparent to-yellow-400/20 opacity-0 group-hover:opacity-100 transition-opacity" />
 
                 <div className="relative p-5 flex flex-col h-full">
                   <div className="flex items-start justify-between">
@@ -215,9 +219,7 @@ export default function CollegeOverview() {
                           {item.name}
                         </h3>
                         {hostname && (
-                          <p className="text-[12px] md:text-sm text-gray-500">
-                            {hostname}
-                          </p>
+                          <p className="text-[12px] md:text-sm text-gray-500">{hostname}</p>
                         )}
                       </div>
                     </div>

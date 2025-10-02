@@ -61,9 +61,10 @@ const absUrl = (url) => {
 export default function StudentInfo() {
   /* Data */
   const [students, setStudents] = useState([]);
-  const [classes, setClasses] = useState([]); // [{id,name,year,sections:[{id,name}] | [ids]}]
-  const [classToSections, setClassToSections] = useState({});
-  const [sectionsDict, setSectionsDict] = useState({}); // id->name for loose mapping
+
+  // classes/sections store
+  const [allClasses, setAllClasses] = useState([]); // raw from classes/
+  const [years, setYears] = useState([]);           // [2026, 2025, ...]
 
   /* UI */
   const [loading, setLoading] = useState(true);
@@ -93,6 +94,7 @@ export default function StudentInfo() {
     photo: null,
     user: null,
   });
+  const [formYear, setFormYear] = useState(null); // NEW: cascade in modal
   const [preview, setPreview] = useState(null);
   const [touched, setTouched] = useState({});
 
@@ -125,104 +127,107 @@ export default function StudentInfo() {
   const [page, setPage] = useState(1);
   const pageSize = 12;
 
-  /* ---------- Derived ---------- */
-  const years = useMemo(() => {
-    const set = new Set();
-    classes.forEach((c) => c.year && set.add(Number(c.year)));
-    return Array.from(set).sort((a, b) => b - a);
-  }, [classes]);
-  const yearOptions = useMemo(() => years.map((y) => ({ value: y, label: String(y) })), [years]);
+  /* ---------- Derived (classes & years) ---------- */
+  // years from allClasses
+  const yearOptions = useMemo(
+    () => years.map((y) => ({ value: y, label: String(y) })),
+    [years]
+  );
 
+  // classesById for label lookup
   const classesById = useMemo(() => {
     const m = {};
-    classes.forEach((c) => (m[c.id] = { name: c.name, year: c.year }));
+    allClasses.forEach((c) => (m[c.id] = { name: c.name, year: c.year, sections_detail: c.sections_detail, sections: c.sections }));
     return m;
-  }, [classes]);
+  }, [allClasses]);
 
+  // helper: get normalized sections for any class id
+  const getSectionsForClassId = (cid) => {
+    if (!cid) return [];
+    const c = classesById[cid];
+    if (!c) return [];
+    const raw = c.sections_detail || c.sections || [];
+    const normalized = raw.map((s) =>
+      typeof s === "object" ? s : { id: s, name: String(s) }
+    );
+    return normalized;
+  };
+
+  // Filter dropdown: classes for selected filterYear
   const classOptions = useMemo(() => {
     const list = filterYear
-      ? classes.filter((c) => Number(c.year) === Number(filterYear))
-      : classes;
+      ? allClasses.filter((c) => Number(c.year) === Number(filterYear))
+      : allClasses;
     return list.map((c) => ({ value: c.id, label: c.name }));
-  }, [classes, filterYear]);
+  }, [allClasses, filterYear]);
 
+  // Filter dropdown: sections for selected filter class
   const filterSectionOptions = useMemo(() => {
     if (!filterClassId) return [];
-    const secs = classToSections[Number(filterClassId)] || [];
-    return secs.map((s) => ({ value: s.id, label: s.name }));
-  }, [filterClassId, classToSections]);
+    return getSectionsForClassId(Number(filterClassId)).map((s) => ({
+      value: s.id,
+      label: s.name,
+    }));
+  }, [filterClassId, classesById]);
 
+  // Modal: classes limited by formYear
+  const classOptionsForForm = useMemo(() => {
+    const list = formYear
+      ? allClasses.filter((c) => Number(c.year) === Number(formYear))
+      : [];
+    return list.map((c) => ({ value: c.id, label: c.name }));
+  }, [allClasses, formYear]);
+
+  // Modal: sections for selected class inside form
   const sectionOptionsForForm = useMemo(() => {
     if (!form.class_name) return [];
-    const secs = classToSections[Number(form.class_name)] || [];
-    return secs.map((s) => ({ value: s.id, label: s.name }));
-  }, [form.class_name, classToSections]);
+    return getSectionsForClassId(Number(form.class_name)).map((s) => ({
+      value: s.id,
+      label: s.name,
+    }));
+  }, [form.class_name, classesById]);
 
+  // For table label fallback
   const sectionNameById = useMemo(() => {
     const m = {};
-    Object.values(classToSections).forEach((arr) => arr.forEach((s) => (m[s.id] = s.name)));
-    for (const [id, name] of Object.entries(sectionsDict)) if (!m[id]) m[id] = name;
+    allClasses.forEach((c) => {
+      const raw = c.sections_detail || c.sections || [];
+      raw.forEach((s) => {
+        if (typeof s === "object") m[s.id] = s.name;
+        else if (!m[s]) m[s] = `#${s}`;
+      });
+    });
     return m;
-  }, [classToSections, sectionsDict]);
+  }, [allClasses]);
 
   /* ---------- Load ---------- */
   useEffect(() => {
     (async () => {
       try {
         setLoading(true);
-        const [studentsRes, classesRes] = await Promise.all([
-          axiosInstance.get("students/"),
-          axiosInstance.get("class-names/"),
-        ]);
 
+        // Load students
+        const studentsRes = await axiosInstance.get("students/");
         const studentsList = (Array.isArray(studentsRes.data)
           ? studentsRes.data
           : studentsRes.data?.results || []
         ).map((s) => ({ ...s, photo: absUrl(s.photo) }));
+        setStudents(studentsList);
 
-        const clsRaw = Array.isArray(classesRes.data)
+        // Load classes (all), derive years
+        const classesRes = await axiosInstance.get("classes/");
+        const cls = Array.isArray(classesRes.data)
           ? classesRes.data
           : classesRes.data?.results || [];
+        setAllClasses(cls);
 
-        // If classes.sections is array of ids, build id->name map
-        let sectionsMap = {};
-        const containsSectionIds =
-          clsRaw.some(
-            (c) =>
-              Array.isArray(c.sections) &&
-              c.sections.length &&
-              typeof c.sections[0] !== "object"
-          ) && clsRaw.length;
-        if (containsSectionIds) {
-          try {
-            const secRes = await axiosInstance.get("sections/");
-            const arr = Array.isArray(secRes.data) ? secRes.data : secRes.data?.results || [];
-            sectionsMap = Object.fromEntries(arr.map((s) => [String(s.id), s.name]));
-          } catch {
-            /* ignore */
+        const setY = new Set();
+        for (const c of cls) {
+          if (c?.year !== undefined && c?.year !== null && c?.year !== "") {
+            setY.add(Number(c.year));
           }
         }
-
-        const map = {};
-        clsRaw.forEach((c) => {
-          const secs =
-            Array.isArray(c.sections) && c.sections.length
-              ? typeof c.sections[0] === "object"
-                ? c.sections.map((s) => ({ id: s.id, name: s.name }))
-                : c.sections.map((id) => ({
-                    id,
-                    name: sectionsMap[String(id)] || `#${id}`,
-                  }))
-              : Array.isArray(c.sections_detail)
-              ? c.sections_detail.map((s) => ({ id: s.id, name: s.name }))
-              : [];
-          map[c.id] = secs;
-        });
-
-        setSectionsDict(sectionsMap);
-        setClasses(clsRaw);
-        setClassToSections(map);
-        setStudents(studentsList);
+        setYears(Array.from(setY).sort((a, b) => b - a));
       } catch (e) {
         console.error(e);
         toast.error("Failed to load data.");
@@ -293,6 +298,7 @@ export default function StudentInfo() {
       photo: null,
       user: null,
     });
+    setFormYear(null); // user picks year first
     setPreview(null);
     setTouched({});
     setCreateLogin(false);
@@ -312,6 +318,7 @@ export default function StudentInfo() {
   };
 
   const openEdit = (s) => {
+    const cls = classesById[s.class_name];
     setEditingId(s.id);
     setForm({
       full_name: s.full_name || "",
@@ -327,6 +334,7 @@ export default function StudentInfo() {
       photo: null,
       user: s.user || null,
     });
+    setFormYear(cls?.year != null ? Number(cls.year) : null); // ensure cascading in modal
     setPreview(absUrl(s.photo) || null);
     setTouched({});
     setCreateLogin(Boolean(s.user));
@@ -638,7 +646,7 @@ export default function StudentInfo() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Students</h1>
           <p className="text-sm text-slate-500">
-            Manage student records. Class &amp; Section are required.
+            Manage student records. Year → Class → Section are required.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -939,14 +947,49 @@ export default function StudentInfo() {
                   )}
                 </div>
 
+                {/* Year (modal cascade) */}
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">
+                    Year <span className="text-red-600">*</span>
+                  </label>
+                  <Select
+                    options={yearOptions}
+                    value={yearOptions.find((o) => Number(o.value) === Number(formYear)) || null}
+                    onChange={(opt) => {
+                      const y = opt ? Number(opt.value) : null;
+                      setFormYear(y);
+                      // reset downstream
+                      setForm((f) => ({ ...f, class_name: null, section: null }));
+                      setTouched((t) => ({ ...t, class_name: false, section: false }));
+                    }}
+                    placeholder="Select year"
+                    classNamePrefix="rs"
+                    menuPortalTarget={menuPortalTarget}
+                    menuPosition="fixed"
+                    styles={{
+                      control: (base) => ({
+                        ...base,
+                        borderRadius: 12,
+                        paddingBlock: 2,
+                        boxShadow: "none",
+                      }),
+                      menu: (b) => ({ ...b, borderRadius: 12 }),
+                      menuPortal: (b) => ({ ...b, zIndex: 9999 }),
+                    }}
+                  />
+                </div>
+
                 {/* Class */}
                 <div>
                   <label className="block text-xs font-medium text-slate-600 mb-1">
                     Class <span className="text-red-600">*</span>
                   </label>
                   <Select
-                    options={classOptions}
-                    value={classOptions.find((o) => Number(o.value) === Number(form.class_name)) || null}
+                    options={classOptionsForForm}
+                    value={
+                      classOptionsForForm.find((o) => Number(o.value) === Number(form.class_name)) ||
+                      null
+                    }
                     onChange={(opt) => {
                       setForm((f) => ({
                         ...f,
@@ -956,7 +999,8 @@ export default function StudentInfo() {
                       setTouched((t) => ({ ...t, class_name: true, section: false }));
                     }}
                     onBlur={() => onBlur("class_name")}
-                    placeholder="Select class"
+                    placeholder={formYear ? "Select class" : "Pick year first"}
+                    isDisabled={!formYear}
                     classNamePrefix="rs"
                     menuPortalTarget={menuPortalTarget}
                     menuPosition="fixed"

@@ -52,6 +52,10 @@ import GradeScaleManager from "./pages/DashboardPages/academics/GradeScaleManage
 import ExamsAdmin from "./pages/DashboardPages/academics/ExamsAdmin.jsx";
 // import AdminFinalizeButton from "./pages/AdminFinalizeButton.jsx";
 import AdminMarksViewer from "./pages/DashboardPages/academics/AdminMarksViewer.jsx"; 
+import AdminReport from "./pages/DashboardPages/academics/AdminReport.jsx";
+
+
+
 /* === Teacher Panel imports (new) === */
 import TeacherPanel from "./Layout/TeacherPanel.jsx";
 import TeacherDashboard from "./pages/Teachers/Dashboard.jsx";
@@ -176,6 +180,7 @@ const router = createBrowserRouter([
        { path: "exams-admin", element: <ExamsAdmin /> },
       //  { path: "finalize-marks", element: <AdminFinalizeButton /> },
        { path: "view-marks", element: <AdminMarksViewer /> },
+       { path: "admin-report", element: <AdminReport /> },
     ],
   },
 
