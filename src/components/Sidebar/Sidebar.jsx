@@ -65,11 +65,11 @@ export default function Sidebar() {
   const Divider = () => <div className={`${collapsed ? "mx-2" : "ml-3 mr-2"} h-px bg-white/20 my-2`} />;
 
   return (
- <aside
-  className={`sticky top-0 h-[100dvh] max-h-screen overflow-y-auto bg-[#2C8E3F] text-white flex flex-col ${
-    collapsed ? "w-16" : "w-64"
-  } transition-all duration-300`}
->
+    <aside
+      className={`sticky top-0 h-[100dvh] max-h-screen overflow-y-auto bg-[#2C8E3F] text-white flex flex-col ${
+        collapsed ? "w-16" : "w-64"
+      } transition-all duration-300`}
+    >
       {/* Top */}
       <div className="relative">
         <div className="flex items-center px-4 py-4">
@@ -110,8 +110,8 @@ export default function Sidebar() {
           </button>
 
           <div
-            className={`transition-all duration-300 overflow-hidden ${
-              openId === "site" ? "max-h-[600px]" : "max-h-0"
+            className={`transition-[max-height] duration-300 overflow-hidden ${
+              openId === "site" ? "max-h-[9999px]" : "max-h-0"
             } ${collapsed ? "pl-0" : "pl-4"}`}
           >
             <NavLink to="/dashboard/college-info" className={navLinkStyle}>
@@ -165,8 +165,8 @@ export default function Sidebar() {
           </button>
 
           <div
-            className={`transition-all duration-300 overflow-hidden ${
-              openId === "default" ? "max-h-[600px]" : "max-h-0"
+            className={`transition-[max-height] duration-300 overflow-hidden ${
+              openId === "default" ? "max-h-[9999px]" : "max-h-0"
             } ${collapsed ? "pl-0" : "pl-4"}`}
           >
             <NavLink to="/dashboard/student-info-form" className={navLinkStyle}>
@@ -209,8 +209,8 @@ export default function Sidebar() {
           </button>
 
           <div
-            className={`transition-all duration-300 overflow-hidden ${
-              openId === "academic" ? "max-h-[800px]" : "max-h-0"
+            className={`transition-[max-height] duration-300 overflow-hidden ${
+              openId === "academic" ? "max-h-[9999px]" : "max-h-0"
             } ${collapsed ? "pl-0" : "pl-4"}`}
           >
             {/* Group 1: Setup */}
@@ -248,8 +248,7 @@ export default function Sidebar() {
               <MdLibraryBooks className="text-lg" />
               {!collapsed && "Class Timetable"}
             </NavLink>
-            
-            
+
             {/* <NavLink to="/dashboard/assigned-teacher-list" className={navLinkStyle}>
               <FaRegCalendarAlt className="text-lg" />
               {!collapsed && "Class Routine"}
@@ -267,6 +266,11 @@ export default function Sidebar() {
               <FaRegCalendarAlt className="text-lg" />
               {!collapsed && "Add Result"}
             </NavLink>
+            <NavLink to="/dashboard/routine-admin" className={navLinkStyle}>
+              <FaRegCalendarAlt className="text-lg" />
+              {!collapsed && "Class Routine"}
+            </NavLink>
+
             <NavLink to="/dashboard/grade-scales" className={navLinkStyle}>
               <MdLibraryBooks className="text-lg" />
               {!collapsed && "Grade Scales"}

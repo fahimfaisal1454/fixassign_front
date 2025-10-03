@@ -53,6 +53,7 @@ import ExamsAdmin from "./pages/DashboardPages/academics/ExamsAdmin.jsx";
 // import AdminFinalizeButton from "./pages/AdminFinalizeButton.jsx";
 import AdminMarksViewer from "./pages/DashboardPages/academics/AdminMarksViewer.jsx"; 
 import AdminReport from "./pages/DashboardPages/academics/AdminReport.jsx";
+import RoutinesAdmin from "./pages/DashboardPages/academics/RoutinesAdmin.jsx";
 
 
 
@@ -181,6 +182,7 @@ const router = createBrowserRouter([
       //  { path: "finalize-marks", element: <AdminFinalizeButton /> },
        { path: "view-marks", element: <AdminMarksViewer /> },
        { path: "admin-report", element: <AdminReport /> },
+       { path: "routine-admin", element: <RoutinesAdmin /> },
     ],
   },
 

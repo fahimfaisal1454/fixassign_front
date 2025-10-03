@@ -41,7 +41,7 @@ export default function GalleryUpload() {
   };
 
   const handleAdd = () => {
-    if (galleryItems.length < 4) {
+    if (galleryItems.length < 5) {
       setGalleryItems([
         ...galleryItems,
         { image: null, caption: "", preview: null },
