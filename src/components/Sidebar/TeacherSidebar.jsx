@@ -107,10 +107,10 @@ export default function TeacherSidebar() {
           {!collapsed && "Assignments"}
         </NavLink>
 
-        <NavLink to="/teacher/reports" className={navLinkStyle} title="Reports">
+        {/* <NavLink to="/teacher/reports" className={navLinkStyle} title="Reports">
           <TbReportAnalytics className="text-lg" />
           {!collapsed && "Reports"}
-        </NavLink>
+        </NavLink> */}
 
         <NavLink to="/teacher/notices" className={navLinkStyle} title="Notices">
           <FaBell className="text-lg" />
@@ -122,7 +122,7 @@ export default function TeacherSidebar() {
       <div className="px-2 py-4 border-t border-purple-700">
         <NavLink to="/" className={navLinkStyle} title="Home">
           <AiFillHome className="text-lg" />
-          {!collapsed && "হোম"}
+          {!collapsed && "Home"}
         </NavLink>
 
         <button
@@ -131,7 +131,7 @@ export default function TeacherSidebar() {
           title="Logout"
         >
           <IoIosLogOut className="text-lg" />
-          {!collapsed && <span>লগআউট</span>}
+          {!collapsed && <span>Logout</span>}
         </button>
       </div>
     </aside>

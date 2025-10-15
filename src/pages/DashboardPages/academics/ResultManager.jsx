@@ -15,9 +15,10 @@ export default function ResultManager() {
     category: "",
     class_name: "",
     exam_name: "",
-    file: null,
+    file: null, // File | null
   });
   const [existingFileUrl, setExistingFileUrl] = useState("");
+  const [filePreviewUrl, setFilePreviewUrl] = useState(null); // for image preview
 
   const getClassLabel = (idOrName) => {
     if (!idOrName) return "N/A";
@@ -69,10 +70,40 @@ export default function ResultManager() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [formData.category]);
 
+  // Simple helper to tell if a URL looks like an image (for existing files)
+  const isImageUrl = (url) => /\.(png|jpe?g|webp|gif|bmp|svg)(\?.*)?$/i.test(url || "");
+
   const handleChange = (e) => {
     const { name, value, files } = e.target;
+
     if (name === "file") {
-      setFormData((p) => ({ ...p, file: files?.[0] || null }));
+      const file = files?.[0] || null;
+      if (!file) {
+        setFormData((p) => ({ ...p, file: null }));
+        setFilePreviewUrl(null);
+        return;
+      }
+
+      // Accept only PDF or images
+      const isPdf = file.type === "application/pdf";
+      const isImage = file.type.startsWith("image/");
+      if (!isPdf && !isImage) {
+        // Basic guard; you can swap for a toast if you use one in this page.
+        window.alert("Only PDF or image files are allowed.");
+        e.target.value = "";
+        setFormData((p) => ({ ...p, file: null }));
+        setFilePreviewUrl(null);
+        return;
+      }
+
+      setFormData((p) => ({ ...p, file }));
+      // Show preview only for images
+      if (isImage) {
+        const url = URL.createObjectURL(file);
+        setFilePreviewUrl(url);
+      } else {
+        setFilePreviewUrl(null);
+      }
     } else if (name === "category") {
       // Update category; exam_name will be validated/reset in the effect above
       setFormData((p) => ({ ...p, category: value }));
@@ -111,7 +142,11 @@ export default function ResultManager() {
       file: null,
     });
     setExistingFileUrl(result.file || "");
+    setFilePreviewUrl(null);
     setEditing(true);
+    // also clear any existing file input
+    const f = document.getElementById("result_file_input");
+    if (f) f.value = "";
   };
 
   const handleDelete = async (id) => {
@@ -130,6 +165,7 @@ export default function ResultManager() {
       file: null,
     });
     setExistingFileUrl("");
+    setFilePreviewUrl(null);
     setEditing(false);
     const f = document.getElementById("result_file_input");
     if (f) f.value = "";
@@ -230,29 +266,58 @@ export default function ResultManager() {
 
           {/* Existing file preview when editing */}
           {editing && existingFileUrl && !formData.file && (
-            <div className="md:col-span-2 border border-gray-300 rounded-xl p-3 flex items-center justify-between bg-gray-50">
-              <a
-                href={existingFileUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="underline text-blue-800 font-semibold"
-              >
-                View current file
-              </a>
+            <div className="md:col-span-2 border border-gray-300 rounded-xl p-3 flex items-center justify-between bg-gray-50 gap-4">
+              <div className="flex items-center gap-4">
+                {isImageUrl(existingFileUrl) ? (
+                  <img
+                    src={existingFileUrl}
+                    alt="Result file"
+                    className="w-16 h-16 object-cover rounded-md border"
+                  />
+                ) : (
+                  <div className="text-sm opacity-80">Existing file:</div>
+                )}
+                <a
+                  href={existingFileUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline text-blue-800 font-semibold"
+                >
+                  View current file
+                </a>
+              </div>
               <span className="text-sm opacity-80">
                 (Uploading a new file will replace it)
               </span>
             </div>
           )}
 
-          <input
-            id="result_file_input"
-            type="file"
-            name="file"
-            onChange={handleChange}
-            className="file-input file-input-bordered file-input-md bg-white text-black md:col-span-2"
-            accept="application/pdf"
-          />
+          {/* New file input (PDF or Image) */}
+          <div className="md:col-span-2">
+            <input
+              id="result_file_input"
+              type="file"
+              name="file"
+              onChange={handleChange}
+              className="file-input file-input-bordered file-input-md bg-white text-black w-full"
+              accept="application/pdf,image/*"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Allowed: PDF or image (PNG, JPG, JPEG, WEBP, GIF, etc.)
+            </p>
+
+            {/* New image preview (only if selected file is an image) */}
+            {filePreviewUrl && (
+              <div className="mt-3">
+                <div className="text-sm font-medium mb-1">Preview:</div>
+                <img
+                  src={filePreviewUrl}
+                  alt="Selected preview"
+                  className="w-24 h-24 object-cover rounded-md border"
+                />
+              </div>
+            )}
+          </div>
 
           <button
             type="submit"
@@ -311,7 +376,7 @@ export default function ResultManager() {
                         rel="noopener noreferrer"
                         className="underline text-blue-800 font-semibold"
                       >
-                        Download
+                        View / Download
                       </a>
                     ) : (
                       <span className="opacity-70">No File</span>
